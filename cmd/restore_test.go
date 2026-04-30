@@ -200,3 +200,84 @@ func TestSelectContainerAndContainedForRestore_HandlesCycles(t *testing.T) {
 		t.Fatal("expected container b to be selected")
 	}
 }
+
+func TestApplyRestoreDirectoryConfig_UsesBackupConfigValuesInReverseWhenFlagsAreNotChanged(t *testing.T) {
+	originalSrcDir := restoreSrcDir
+	originalDstDir := restoreDstDir
+	defer func() {
+		restoreSrcDir = originalSrcDir
+		restoreDstDir = originalDstDir
+	}()
+
+	restoreSrcDir = "/default/restore/src"
+	restoreDstDir = "/default/restore/dst"
+
+	config := dackupConfig{
+		BackupSrcDir: "/config/backup/src",
+		BackupDstDir: "/config/backup/dst",
+	}
+
+	applyRestoreDirectoryConfig(config, false, false)
+
+	if restoreSrcDir != config.BackupDstDir {
+		t.Fatalf("expected restoreSrcDir %q, got %q", config.BackupDstDir, restoreSrcDir)
+	}
+
+	if restoreDstDir != config.BackupSrcDir {
+		t.Fatalf("expected restoreDstDir %q, got %q", config.BackupSrcDir, restoreDstDir)
+	}
+}
+
+func TestApplyRestoreDirectoryConfig_KeepsFlagValuesWhenFlagsAreChanged(t *testing.T) {
+	originalSrcDir := restoreSrcDir
+	originalDstDir := restoreDstDir
+	defer func() {
+		restoreSrcDir = originalSrcDir
+		restoreDstDir = originalDstDir
+	}()
+
+	restoreSrcDir = "/flag/restore/src"
+	restoreDstDir = "/flag/restore/dst"
+
+	config := dackupConfig{
+		BackupSrcDir: "/config/backup/src",
+		BackupDstDir: "/config/backup/dst",
+	}
+
+	applyRestoreDirectoryConfig(config, true, true)
+
+	if restoreSrcDir != "/flag/restore/src" {
+		t.Fatalf("expected restoreSrcDir to keep flag value %q, got %q", "/flag/restore/src", restoreSrcDir)
+	}
+
+	if restoreDstDir != "/flag/restore/dst" {
+		t.Fatalf("expected restoreDstDir to keep flag value %q, got %q", "/flag/restore/dst", restoreDstDir)
+	}
+}
+
+func TestApplyRestoreDirectoryConfig_IgnoresEmptyConfigValues(t *testing.T) {
+	originalSrcDir := restoreSrcDir
+	originalDstDir := restoreDstDir
+	defer func() {
+		restoreSrcDir = originalSrcDir
+		restoreDstDir = originalDstDir
+	}()
+
+	restoreSrcDir = "/default/restore/src"
+	restoreDstDir = "/default/restore/dst"
+
+	config := dackupConfig{
+		BackupSrcDir: "",
+		BackupDstDir: "   ",
+	}
+
+	applyRestoreDirectoryConfig(config, false, false)
+
+	if restoreSrcDir != "/default/restore/src" {
+		t.Fatalf("expected restoreSrcDir to keep default value %q, got %q", "/default/restore/src", restoreSrcDir)
+	}
+
+	if restoreDstDir != "/default/restore/dst" {
+		t.Fatalf("expected restoreDstDir to keep default value %q, got %q", "/default/restore/dst", restoreDstDir)
+	}
+}

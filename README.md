@@ -102,6 +102,8 @@ Example configuration:
 {
   "user": "appuser",
   "group": "appgroup",
+  "backup_src_dir": "/opt/apps_docker",
+  "backup_dst_dir": "/backups/in",
   "containers": [
     {
       "container": "paperless",
@@ -139,6 +141,8 @@ Example configuration:
 | --- | --- |
 | `user` | Owner user applied to backed up or restored files. |
 | `group` | Owner group applied to backed up or restored files. |
+| `backup_src_dir` | Source root used by `backup`; restore uses this as its default destination root. |
+| `backup_dst_dir` | Destination root used by `backup`; restore uses this as its default source root. |
 | `config_file` | Optional path to another config file containing `containers`. |
 | `containers` | List of configured Docker containers. |
 | `container` | Docker container name. |

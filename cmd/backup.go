@@ -40,7 +40,11 @@ Examples:
   sudo dackup backup paperless adguard`,
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runBackup(args)
+		return runBackup(
+			args,
+			cmd.Flags().Changed("src-dir"),
+			cmd.Flags().Changed("dst-dir"),
+		)
 	},
 }
 
@@ -59,7 +63,7 @@ func init() {
 	backupCmd.Flags().StringVar(&backupLogFile, "log-file", backupLogFile, "log file path")
 }
 
-func runBackup(requestedContainers []string) error {
+func runBackup(requestedContainers []string, srcDirFlagChanged bool, dstDirFlagChanged bool) error {
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("this command requires root privileges; run it with sudo")
 	}
@@ -68,6 +72,8 @@ func runBackup(requestedContainers []string) error {
 	if err != nil {
 		return err
 	}
+
+	applyBackupDirectoryConfig(config, srcDirFlagChanged, dstDirFlagChanged)
 
 	configs, err := filterConfigsForBackup(config.Containers, requestedContainers)
 	if err != nil {
@@ -106,6 +112,16 @@ func runBackup(requestedContainers []string) error {
 
 	logMessage("INFO", "Backup command finished successfully")
 	return nil
+}
+
+func applyBackupDirectoryConfig(config dackupConfig, srcDirFlagChanged bool, dstDirFlagChanged bool) {
+	if !srcDirFlagChanged && strings.TrimSpace(config.BackupSrcDir) != "" {
+		backupSrcDir = config.BackupSrcDir
+	}
+
+	if !dstDirFlagChanged && strings.TrimSpace(config.BackupDstDir) != "" {
+		backupDstDir = config.BackupDstDir
+	}
 }
 
 func filterConfigsForBackup(configs []containerConfig, requestedContainers []string) ([]containerConfig, error) {

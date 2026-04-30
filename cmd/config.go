@@ -108,6 +108,16 @@ func runConfigInit() error {
 		return err
 	}
 
+	backupSourceDir, err := askStringWithDefault(reader, "Backup source root directory", backupSrcDir)
+	if err != nil {
+		return err
+	}
+
+	backupDestinationDir, err := askStringWithDefault(reader, "Backup destination root directory", backupDstDir)
+	if err != nil {
+		return err
+	}
+
 	useCustomFile, err := askBool(reader, "Do you want to store containers in a custom config file?", false)
 	if err != nil {
 		return err
@@ -125,9 +135,11 @@ func runConfigInit() error {
 		}
 
 		mainConfig := dackupConfig{
-			User:       owner,
-			Group:      group,
-			ConfigFile: customPath,
+			User:         owner,
+			Group:        group,
+			ConfigFile:   customPath,
+			BackupSrcDir: backupSourceDir,
+			BackupDstDir: backupDestinationDir,
 		}
 
 		if err := writeDackupConfig(configFilePath, mainConfig); err != nil {
@@ -167,9 +179,11 @@ func runConfigInit() error {
 	}
 
 	config := dackupConfig{
-		User:       owner,
-		Group:      group,
-		Containers: containers,
+		User:         owner,
+		Group:        group,
+		BackupSrcDir: backupSourceDir,
+		BackupDstDir: backupDestinationDir,
+		Containers:   containers,
 	}
 
 	if err := writeDackupConfig(configFilePath, config); err != nil {
@@ -301,6 +315,20 @@ func runConfigUseFile(customPath string) error {
 
 	if strings.TrimSpace(mainConfig.Group) == "" {
 		mainConfig.Group, err = askRequiredString(reader, "Backup and restore file owner group")
+		if err != nil {
+			return err
+		}
+	}
+
+	if strings.TrimSpace(mainConfig.BackupSrcDir) == "" {
+		mainConfig.BackupSrcDir, err = askStringWithDefault(reader, "Backup source root directory", backupSrcDir)
+		if err != nil {
+			return err
+		}
+	}
+
+	if strings.TrimSpace(mainConfig.BackupDstDir) == "" {
+		mainConfig.BackupDstDir, err = askStringWithDefault(reader, "Backup destination root directory", backupDstDir)
 		if err != nil {
 			return err
 		}

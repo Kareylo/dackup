@@ -200,3 +200,84 @@ func TestSelectContainerAndContainedForBackup_HandlesCycles(t *testing.T) {
 		t.Fatal("expected container b to be selected")
 	}
 }
+
+func TestApplyBackupDirectoryConfig_UsesConfigValuesWhenFlagsAreNotChanged(t *testing.T) {
+	originalSrcDir := backupSrcDir
+	originalDstDir := backupDstDir
+	defer func() {
+		backupSrcDir = originalSrcDir
+		backupDstDir = originalDstDir
+	}()
+
+	backupSrcDir = "/default/src"
+	backupDstDir = "/default/dst"
+
+	config := dackupConfig{
+		BackupSrcDir: "/config/src",
+		BackupDstDir: "/config/dst",
+	}
+
+	applyBackupDirectoryConfig(config, false, false)
+
+	if backupSrcDir != config.BackupSrcDir {
+		t.Fatalf("expected backupSrcDir %q, got %q", config.BackupSrcDir, backupSrcDir)
+	}
+
+	if backupDstDir != config.BackupDstDir {
+		t.Fatalf("expected backupDstDir %q, got %q", config.BackupDstDir, backupDstDir)
+	}
+}
+
+func TestApplyBackupDirectoryConfig_KeepsFlagValuesWhenFlagsAreChanged(t *testing.T) {
+	originalSrcDir := backupSrcDir
+	originalDstDir := backupDstDir
+	defer func() {
+		backupSrcDir = originalSrcDir
+		backupDstDir = originalDstDir
+	}()
+
+	backupSrcDir = "/flag/src"
+	backupDstDir = "/flag/dst"
+
+	config := dackupConfig{
+		BackupSrcDir: "/config/src",
+		BackupDstDir: "/config/dst",
+	}
+
+	applyBackupDirectoryConfig(config, true, true)
+
+	if backupSrcDir != "/flag/src" {
+		t.Fatalf("expected backupSrcDir to keep flag value %q, got %q", "/flag/src", backupSrcDir)
+	}
+
+	if backupDstDir != "/flag/dst" {
+		t.Fatalf("expected backupDstDir to keep flag value %q, got %q", "/flag/dst", backupDstDir)
+	}
+}
+
+func TestApplyBackupDirectoryConfig_IgnoresEmptyConfigValues(t *testing.T) {
+	originalSrcDir := backupSrcDir
+	originalDstDir := backupDstDir
+	defer func() {
+		backupSrcDir = originalSrcDir
+		backupDstDir = originalDstDir
+	}()
+
+	backupSrcDir = "/default/src"
+	backupDstDir = "/default/dst"
+
+	config := dackupConfig{
+		BackupSrcDir: "   ",
+		BackupDstDir: "",
+	}
+
+	applyBackupDirectoryConfig(config, false, false)
+
+	if backupSrcDir != "/default/src" {
+		t.Fatalf("expected backupSrcDir to keep default value %q, got %q", "/default/src", backupSrcDir)
+	}
+
+	if backupDstDir != "/default/dst" {
+		t.Fatalf("expected backupDstDir to keep default value %q, got %q", "/default/dst", backupDstDir)
+	}
+}

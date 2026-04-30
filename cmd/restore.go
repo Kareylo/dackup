@@ -31,7 +31,11 @@ Examples:
   sudo dackup restore paperless adguard`,
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runRestore(args)
+		return runRestore(
+			args,
+			cmd.Flags().Changed("src-dir"),
+			cmd.Flags().Changed("dst-dir"),
+		)
 	},
 }
 
@@ -50,7 +54,7 @@ func init() {
 	restoreCmd.Flags().StringVar(&restoreLogFile, "log-file", restoreLogFile, "restore log file path")
 }
 
-func runRestore(requestedContainers []string) error {
+func runRestore(requestedContainers []string, srcDirFlagChanged bool, dstDirFlagChanged bool) error {
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("this command requires root privileges; run it with sudo")
 	}
@@ -59,6 +63,8 @@ func runRestore(requestedContainers []string) error {
 	if err != nil {
 		return err
 	}
+
+	applyRestoreDirectoryConfig(config, srcDirFlagChanged, dstDirFlagChanged)
 
 	configs, err := filterConfigsForRestore(config.Containers, requestedContainers)
 	if err != nil {
@@ -90,6 +96,16 @@ func runRestore(requestedContainers []string) error {
 
 	restoreLogMessage("INFO", "Restore command finished successfully")
 	return nil
+}
+
+func applyRestoreDirectoryConfig(config dackupConfig, srcDirFlagChanged bool, dstDirFlagChanged bool) {
+	if !srcDirFlagChanged && strings.TrimSpace(config.BackupDstDir) != "" {
+		restoreSrcDir = config.BackupDstDir
+	}
+
+	if !dstDirFlagChanged && strings.TrimSpace(config.BackupSrcDir) != "" {
+		restoreDstDir = config.BackupSrcDir
+	}
 }
 
 func restorePreflightChecks(effectiveConfigPath string, config dackupConfig, configs []containerConfig) error {

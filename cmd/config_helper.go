@@ -10,10 +10,12 @@ import (
 const defaultConfigRelativePath = ".config/dackup/config.json"
 
 type dackupConfig struct {
-	User       string            `json:"user,omitempty"`
-	Group      string            `json:"group,omitempty"`
-	ConfigFile string            `json:"config_file,omitempty"`
-	Containers []containerConfig `json:"containers,omitempty"`
+	User         string            `json:"user,omitempty"`
+	Group        string            `json:"group,omitempty"`
+	ConfigFile   string            `json:"config_file,omitempty"`
+	BackupSrcDir string            `json:"backup_src_dir,omitempty"`
+	BackupDstDir string            `json:"backup_dst_dir,omitempty"`
+	Containers   []containerConfig `json:"containers,omitempty"`
 }
 
 func defaultDackupConfigPath() (string, error) {
