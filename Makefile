@@ -1,7 +1,7 @@
 APP_NAME := dackup
 BUILD_DIR := build
 BIN := $(BUILD_DIR)/$(APP_NAME)
-INSTALL_DIR := /usr/sbin
+INSTALL_DIR := /usr/local/sbin
 INSTALL_BIN := $(INSTALL_DIR)/$(APP_NAME)
 
 GO ?= go
