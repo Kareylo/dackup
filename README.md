@@ -315,3 +315,13 @@ go build -o build/dackup .
 - Make sure Docker container names match the names in your configuration.
 - Use `--dry-run` before running a backup or restore for the first time.
 - Restore uses `rsync -a --delete`, so destination files not present in the backup source can be removed.
+
+# TODO
+Here is a list of todo things that should be implemented :
+- [ ] Use backend for backup usage:
+  - [ ] rclone
+  - [ ] Borg
+  - [ ] Kopia
+  - [ ] resting
+- [ ] Add podman integration, not only docker
+- [ ] More ... ?
