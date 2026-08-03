@@ -21,6 +21,11 @@ var (
 	options        *shared.Options
 )
 
+type commandService struct {
+	options *shared.Options
+	prompt  shared.PromptService
+}
+
 func NewCommand(sharedOptions *shared.Options) *cobra.Command {
 	options = sharedOptions
 
@@ -90,12 +95,18 @@ The custom file path is stored in the main dackup config file, usually ~/.config
 	return configCmd
 }
 
+func newCommandService(reader *bufio.Reader) commandService {
+	return commandService{
+		options: options,
+		prompt:  shared.NewPromptService(reader),
+	}
+}
+
 func runConfigInit() error {
-	reader := bufio.NewReader(os.Stdin)
+	service := newCommandService(bufio.NewReader(os.Stdin))
 
 	if shared.FileExists(configFilePath) {
-		overwrite, err := askBool(
-			reader,
+		overwrite, err := service.prompt.Bool(
 			fmt.Sprintf("Configuration file already exists at %s. Overwrite it?", configFilePath),
 			false,
 		)
@@ -109,82 +120,36 @@ func runConfigInit() error {
 		}
 	}
 
-	owner, err := askRequiredString(reader, "Backup and restore file owner user")
+	owner, err := service.prompt.RequiredString("Backup and restore file owner user")
 	if err != nil {
 		return err
 	}
 
-	group, err := askRequiredString(reader, "Backup and restore file owner group")
+	group, err := service.prompt.RequiredString("Backup and restore file owner group")
 	if err != nil {
 		return err
 	}
 
-	backupSourceDir, err := askStringWithDefault(reader, "Backup source root directory", defaultBackupSrcDir)
+	backupSourceDir, err := service.prompt.StringWithDefault("Backup source root directory", defaultBackupSrcDir)
 	if err != nil {
 		return err
 	}
 
-	backupDestinationDir, err := askStringWithDefault(reader, "Backup destination root directory", defaultBackupDstDir)
+	backupDestinationDir, err := service.prompt.StringWithDefault("Backup destination root directory", defaultBackupDstDir)
 	if err != nil {
 		return err
 	}
 
-	useCustomFile, err := askBool(reader, "Do you want to store containers in a custom config file?", false)
+	useCustomFile, err := service.prompt.Bool("Do you want to store containers in a custom config file?", false)
 	if err != nil {
 		return err
 	}
 
 	if useCustomFile {
-		customPath, err := askRequiredString(reader, "Custom containers config file path")
-		if err != nil {
-			return err
-		}
-
-		customPath, err = normalizeConfigPath(customPath)
-		if err != nil {
-			return err
-		}
-
-		mainConfig := shared.DackupConfig{
-			User:         owner,
-			Group:        group,
-			ConfigFile:   customPath,
-			BackupSrcDir: backupSourceDir,
-			BackupDstDir: backupDestinationDir,
-		}
-
-		if err := shared.WriteDackupConfig(configFilePath, mainConfig, options); err != nil {
-			return err
-		}
-
-		if !shared.FileExists(customPath) {
-			createCustom, err := askBool(
-				reader,
-				fmt.Sprintf("Custom file does not exist at %s. Create it now?", customPath),
-				true,
-			)
-			if err != nil {
-				return err
-			}
-
-			if createCustom {
-				containers, err := askContainers(reader)
-				if err != nil {
-					return err
-				}
-
-				if err := shared.WriteContainerConfigsToPath(customPath, containers, options); err != nil {
-					return err
-				}
-			}
-		}
-
-		fmt.Printf("Main config created: %s\n", configFilePath)
-		fmt.Printf("Custom containers config: %s\n", customPath)
-		return nil
+		return service.createConfigWithCustomContainersFile(owner, group, backupSourceDir, backupDestinationDir)
 	}
 
-	containers, err := askContainers(reader)
+	containers, err := service.askContainers()
 	if err != nil {
 		return err
 	}
@@ -205,20 +170,74 @@ func runConfigInit() error {
 	return nil
 }
 
+func (service commandService) createConfigWithCustomContainersFile(
+	owner string,
+	group string,
+	backupSourceDir string,
+	backupDestinationDir string,
+) error {
+	customPath, err := service.prompt.RequiredString("Custom containers config file path")
+	if err != nil {
+		return err
+	}
+
+	customPath, err = normalizeConfigPath(customPath)
+	if err != nil {
+		return err
+	}
+
+	mainConfig := shared.DackupConfig{
+		User:         owner,
+		Group:        group,
+		ConfigFile:   customPath,
+		BackupSrcDir: backupSourceDir,
+		BackupDstDir: backupDestinationDir,
+	}
+
+	if err := shared.WriteDackupConfig(configFilePath, mainConfig, options); err != nil {
+		return err
+	}
+
+	if !shared.FileExists(customPath) {
+		createCustom, err := service.prompt.Bool(
+			fmt.Sprintf("Custom file does not exist at %s. Create it now?", customPath),
+			true,
+		)
+		if err != nil {
+			return err
+		}
+
+		if createCustom {
+			containers, err := service.askContainers()
+			if err != nil {
+				return err
+			}
+
+			if err := shared.WriteContainerConfigsToPath(customPath, containers, options); err != nil {
+				return err
+			}
+		}
+	}
+
+	fmt.Printf("Main config created: %s\n", configFilePath)
+	fmt.Printf("Custom containers config: %s\n", customPath)
+	return nil
+}
+
 func runConfigAddContainer() error {
-	reader := bufio.NewReader(os.Stdin)
+	service := newCommandService(bufio.NewReader(os.Stdin))
 
 	effectiveConfigPath, err := shared.EffectiveContainersConfigPath(configFilePath)
 	if err != nil {
 		return err
 	}
 
-	configs, err := readExistingContainerConfigs(effectiveConfigPath)
+	configs, err := service.readExistingContainerConfigs(effectiveConfigPath)
 	if err != nil {
 		return err
 	}
 
-	config, err := askContainerConfig(reader)
+	config, err := service.askContainerConfig()
 	if err != nil {
 		return err
 	}
@@ -240,14 +259,14 @@ func runConfigAddContainer() error {
 }
 
 func runConfigUpdateContainer() error {
-	reader := bufio.NewReader(os.Stdin)
+	service := newCommandService(bufio.NewReader(os.Stdin))
 
 	effectiveConfigPath, err := shared.EffectiveContainersConfigPath(configFilePath)
 	if err != nil {
 		return err
 	}
 
-	configs, err := readExistingContainerConfigs(effectiveConfigPath)
+	configs, err := service.readExistingContainerConfigs(effectiveConfigPath)
 	if err != nil {
 		return err
 	}
@@ -258,7 +277,7 @@ func runConfigUpdateContainer() error {
 
 	printContainers(configs)
 
-	selectedContainer, err := askRequiredString(reader, "Container to update")
+	selectedContainer, err := service.prompt.RequiredString("Container to update")
 	if err != nil {
 		return err
 	}
@@ -268,7 +287,7 @@ func runConfigUpdateContainer() error {
 		return fmt.Errorf("container %q was not found in %s", selectedContainer, effectiveConfigPath)
 	}
 
-	updatedConfig, err := askUpdatedContainerConfig(reader, configs[selectedIndex])
+	updatedConfig, err := service.askUpdatedContainerConfig(configs[selectedIndex])
 	if err != nil {
 		return err
 	}
@@ -294,6 +313,8 @@ func runConfigUpdateContainer() error {
 }
 
 func runConfigUseFile(customPath string) error {
+	service := newCommandService(bufio.NewReader(os.Stdin))
+
 	customPath = strings.TrimSpace(customPath)
 	if customPath == "" {
 		return fmt.Errorf("custom config file path cannot be empty")
@@ -315,31 +336,29 @@ func runConfigUseFile(customPath string) error {
 		mainConfig = config
 	}
 
-	reader := bufio.NewReader(os.Stdin)
-
 	if strings.TrimSpace(mainConfig.User) == "" {
-		mainConfig.User, err = askRequiredString(reader, "Backup and restore file owner user")
+		mainConfig.User, err = service.prompt.RequiredString("Backup and restore file owner user")
 		if err != nil {
 			return err
 		}
 	}
 
 	if strings.TrimSpace(mainConfig.Group) == "" {
-		mainConfig.Group, err = askRequiredString(reader, "Backup and restore file owner group")
+		mainConfig.Group, err = service.prompt.RequiredString("Backup and restore file owner group")
 		if err != nil {
 			return err
 		}
 	}
 
 	if strings.TrimSpace(mainConfig.BackupSrcDir) == "" {
-		mainConfig.BackupSrcDir, err = askStringWithDefault(reader, "Backup source root directory", defaultBackupSrcDir)
+		mainConfig.BackupSrcDir, err = service.prompt.StringWithDefault("Backup source root directory", defaultBackupSrcDir)
 		if err != nil {
 			return err
 		}
 	}
 
 	if strings.TrimSpace(mainConfig.BackupDstDir) == "" {
-		mainConfig.BackupDstDir, err = askStringWithDefault(reader, "Backup destination root directory", defaultBackupDstDir)
+		mainConfig.BackupDstDir, err = service.prompt.StringWithDefault("Backup destination root directory", defaultBackupDstDir)
 		if err != nil {
 			return err
 		}
@@ -364,7 +383,7 @@ func runConfigUseFile(customPath string) error {
 	return nil
 }
 
-func askContainers(reader *bufio.Reader) ([]shared.ContainerConfig, error) {
+func (service commandService) askContainers() ([]shared.ContainerConfig, error) {
 	var configs []shared.ContainerConfig
 
 	fmt.Println("Creating dackup containers configuration.")
@@ -372,14 +391,14 @@ func askContainers(reader *bufio.Reader) ([]shared.ContainerConfig, error) {
 	fmt.Println()
 
 	for {
-		config, err := askContainerConfig(reader)
+		config, err := service.askContainerConfig()
 		if err != nil {
 			return nil, err
 		}
 
 		configs = append(configs, config)
 
-		addAnother, err := askBool(reader, "Add another container?", true)
+		addAnother, err := service.prompt.Bool("Add another container?", true)
 		if err != nil {
 			return nil, err
 		}
@@ -394,23 +413,27 @@ func askContainers(reader *bufio.Reader) ([]shared.ContainerConfig, error) {
 	return configs, nil
 }
 
-func askContainerConfig(reader *bufio.Reader) (shared.ContainerConfig, error) {
-	container, err := askRequiredString(reader, "Container name")
+func askContainers(reader *bufio.Reader) ([]shared.ContainerConfig, error) {
+	return newCommandService(reader).askContainers()
+}
+
+func (service commandService) askContainerConfig() (shared.ContainerConfig, error) {
+	container, err := service.prompt.RequiredString("Container name")
 	if err != nil {
 		return shared.ContainerConfig{}, err
 	}
 
-	toStop, err := askBool(reader, "Stop this container before backup?", false)
+	toStop, err := service.prompt.Bool("Stop this container before backup?", false)
 	if err != nil {
 		return shared.ContainerConfig{}, err
 	}
 
-	paths, err := askStringList(reader, "Backup paths, separated by commas. Leave empty if none")
+	paths, err := service.prompt.StringList("Backup paths, separated by commas. Leave empty if none")
 	if err != nil {
 		return shared.ContainerConfig{}, err
 	}
 
-	contains, err := askStringList(reader, "Contained/dependent containers, separated by commas. Leave empty if none")
+	contains, err := service.prompt.StringList("Contained/dependent containers, separated by commas. Leave empty if none")
 	if err != nil {
 		return shared.ContainerConfig{}, err
 	}
@@ -431,20 +454,22 @@ func askContainerConfig(reader *bufio.Reader) (shared.ContainerConfig, error) {
 	return config, nil
 }
 
-func askUpdatedContainerConfig(
-	reader *bufio.Reader,
+func askContainerConfig(reader *bufio.Reader) (shared.ContainerConfig, error) {
+	return newCommandService(reader).askContainerConfig()
+}
+
+func (service commandService) askUpdatedContainerConfig(
 	currentConfig shared.ContainerConfig,
 ) (shared.ContainerConfig, error) {
 	fmt.Printf("Updating container %q. Press Enter to keep the current value.\n", currentConfig.Container)
 	fmt.Println()
 
-	container, err := askStringWithDefault(reader, "Container name", currentConfig.Container)
+	container, err := service.prompt.StringWithDefault("Container name", currentConfig.Container)
 	if err != nil {
 		return shared.ContainerConfig{}, err
 	}
 
-	toStop, err := askBool(
-		reader,
+	toStop, err := service.prompt.Bool(
 		fmt.Sprintf("Stop this container before backup? Current value: %t", currentConfig.ToStop),
 		currentConfig.ToStop,
 	)
@@ -452,12 +477,12 @@ func askUpdatedContainerConfig(
 		return shared.ContainerConfig{}, err
 	}
 
-	paths, err := askStringListWithDefault(reader, "Backup paths, separated by commas", currentConfig.Paths)
+	paths, err := service.prompt.StringListWithDefault("Backup paths, separated by commas", currentConfig.Paths)
 	if err != nil {
 		return shared.ContainerConfig{}, err
 	}
 
-	contains, err := askStringListWithDefault(reader, "Contained/dependent containers, separated by commas", currentConfig.Contains)
+	contains, err := service.prompt.StringListWithDefault("Contained/dependent containers, separated by commas", currentConfig.Contains)
 	if err != nil {
 		return shared.ContainerConfig{}, err
 	}
@@ -478,137 +503,44 @@ func askUpdatedContainerConfig(
 	return updatedConfig, nil
 }
 
+func askUpdatedContainerConfig(
+	reader *bufio.Reader,
+	currentConfig shared.ContainerConfig,
+) (shared.ContainerConfig, error) {
+	return newCommandService(reader).askUpdatedContainerConfig(currentConfig)
+}
+
 func askRequiredString(reader *bufio.Reader, label string) (string, error) {
-	for {
-		value, err := askString(reader, label)
-		if err != nil {
-			return "", err
-		}
-
-		if value != "" {
-			return value, nil
-		}
-
-		fmt.Println("This value is required.")
-	}
+	return shared.NewPromptService(reader).RequiredString(label)
 }
 
 func askString(reader *bufio.Reader, label string) (string, error) {
-	fmt.Printf("%s: ", label)
-
-	value, err := reader.ReadString('\n')
-	if err != nil {
-		return "", err
-	}
-
-	return strings.TrimSpace(value), nil
+	return shared.NewPromptService(reader).String(label)
 }
 
 func askStringWithDefault(reader *bufio.Reader, label string, defaultValue string) (string, error) {
-	fmt.Printf("%s [%s]: ", label, defaultValue)
-
-	value, err := reader.ReadString('\n')
-	if err != nil {
-		return "", err
-	}
-
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return defaultValue, nil
-	}
-
-	return value, nil
+	return shared.NewPromptService(reader).StringWithDefault(label, defaultValue)
 }
 
 func askBool(reader *bufio.Reader, label string, defaultValue bool) (bool, error) {
-	defaultLabel := "y/N"
-	if defaultValue {
-		defaultLabel = "Y/n"
-	}
-
-	for {
-		fmt.Printf("%s [%s]: ", label, defaultLabel)
-
-		value, err := reader.ReadString('\n')
-		if err != nil {
-			return false, err
-		}
-
-		value = strings.ToLower(strings.TrimSpace(value))
-
-		if value == "" {
-			return defaultValue, nil
-		}
-
-		switch value {
-		case "y", "yes", "true", "1":
-			return true, nil
-		case "n", "no", "false", "0":
-			return false, nil
-		default:
-			fmt.Println("Please answer yes or no.")
-		}
-	}
+	return shared.NewPromptService(reader).Bool(label, defaultValue)
 }
 
 func askStringList(reader *bufio.Reader, label string) ([]string, error) {
-	value, err := askString(reader, label)
-	if err != nil {
-		return nil, err
-	}
-
-	return parseStringList(value), nil
+	return shared.NewPromptService(reader).StringList(label)
 }
 
 func askStringListWithDefault(reader *bufio.Reader, label string, defaultValues []string) ([]string, error) {
-	defaultLabel := "none"
-	if len(defaultValues) > 0 {
-		defaultLabel = strings.Join(defaultValues, ", ")
-	}
-
-	fmt.Printf("%s [%s]: ", label, defaultLabel)
-
-	value, err := reader.ReadString('\n')
-	if err != nil {
-		return nil, err
-	}
-
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return defaultValues, nil
-	}
-
-	if strings.EqualFold(value, "none") {
-		return nil, nil
-	}
-
-	return parseStringList(value), nil
+	return shared.NewPromptService(reader).StringListWithDefault(label, defaultValues)
 }
 
 func parseStringList(value string) []string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil
-	}
-
-	parts := strings.Split(value, ",")
-	items := make([]string, 0, len(parts))
-
-	for _, part := range parts {
-		item := strings.TrimSpace(part)
-		if item == "" {
-			continue
-		}
-
-		items = append(items, item)
-	}
-
-	return items
+	return shared.ParseStringList(value)
 }
 
-func readExistingContainerConfigs(path string) ([]shared.ContainerConfig, error) {
+func (service commandService) readExistingContainerConfigs(path string) ([]shared.ContainerConfig, error) {
 	if !shared.FileExists(path) {
-		create, err := askCreateMissingConfig(path)
+		create, err := service.askCreateMissingConfig(path)
 		if err != nil {
 			return nil, err
 		}
@@ -627,9 +559,16 @@ func readExistingContainerConfigs(path string) ([]shared.ContainerConfig, error)
 	return shared.ReadContainerConfigsFromPath(path)
 }
 
+func readExistingContainerConfigs(path string) ([]shared.ContainerConfig, error) {
+	return newCommandService(bufio.NewReader(os.Stdin)).readExistingContainerConfigs(path)
+}
+
+func (service commandService) askCreateMissingConfig(path string) (bool, error) {
+	return service.prompt.Bool(fmt.Sprintf("Configuration file does not exist at %s. Create it?", path), true)
+}
+
 func askCreateMissingConfig(path string) (bool, error) {
-	reader := bufio.NewReader(os.Stdin)
-	return askBool(reader, fmt.Sprintf("Configuration file does not exist at %s. Create it?", path), true)
+	return newCommandService(bufio.NewReader(os.Stdin)).askCreateMissingConfig(path)
 }
 
 func printContainers(configs []shared.ContainerConfig) {
