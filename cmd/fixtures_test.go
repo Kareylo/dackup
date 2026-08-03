@@ -7,69 +7,6 @@ import (
 	"testing"
 )
 
-func testContainerConfigs() []containerConfig {
-	return []containerConfig{
-		{
-			Container: "adguard",
-			ToStop:    true,
-			Paths:     []string{"/data/adguard", "/config/adguard"},
-		},
-		{
-			Container: "paperless",
-			ToStop:    true,
-			Paths:     []string{"/data/paperless"},
-			Contains: []string{
-				"paperless_db",
-				"paperless_broker",
-				"paperless_gotenberg",
-				"paperless_tika",
-			},
-		},
-		{
-			Container: "paperless_db",
-			ToStop:    true,
-			Paths:     []string{"/data/paperless_db"},
-		},
-		{
-			Container: "paperless_broker",
-			ToStop:    true,
-			Paths:     []string{"/data/paperless_broker"},
-			Contains:  []string{"redis"},
-		},
-		{
-			Container: "redis",
-			ToStop:    true,
-			Paths:     []string{"/data/redis"},
-		},
-		{
-			Container: "paperless_gotenberg",
-			ToStop:    true,
-		},
-		{
-			Container: "paperless_tika",
-			ToStop:    true,
-		},
-		{
-			Container: "vaultwarden",
-			ToStop:    false,
-			Paths:     []string{"/data/vaultwarden", "/config/vaultwarden"},
-		},
-	}
-}
-
-func assertContainerNames(t *testing.T, configs []containerConfig, want []string) {
-	t.Helper()
-
-	got := make([]string, 0, len(configs))
-	for _, config := range configs {
-		got = append(got, config.Container)
-	}
-
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("expected containers %#v, got %#v", want, got)
-	}
-}
-
 func touchFile(t *testing.T, path string) {
 	t.Helper()
 

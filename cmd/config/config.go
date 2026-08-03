@@ -1,7 +1,8 @@
-package cmd
+package config
 
 import (
 	"bufio"
+	"dackup/internal/shared"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,61 +11,69 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var configFilePath string
+const (
+	defaultBackupSrcDir = "/opt/apps_docker"
+	defaultBackupDstDir = "/backups/in"
+)
 
-var configCmd = &cobra.Command{
-	Use:   "config",
-	Short: "Manage dackup configuration",
-	Long:  "Create and update the dackup configuration file used by the backup command.",
-}
+var (
+	configFilePath string
+	options        *shared.Options
+)
 
-var configInitCmd = &cobra.Command{
-	Use:   "init",
-	Short: "Create the dackup configuration file",
-	Long:  "Interactively create the dackup configuration file containing containers, backup paths, and stop settings.",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runConfigInit()
-	},
-}
+func NewCommand(sharedOptions *shared.Options) *cobra.Command {
+	options = sharedOptions
 
-var configAddContainerCmd = &cobra.Command{
-	Use:   "add",
-	Short: "Add a container to the dackup configuration",
-	Long:  "Interactively add a container entry to the active dackup configuration file.",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runConfigAddContainer()
-	},
-}
-
-var configUpdateContainerCmd = &cobra.Command{
-	Use:   "update",
-	Short: "Update a container in the dackup configuration",
-	Long:  "List existing containers, then interactively update one container entry in the active dackup configuration file.",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runConfigUpdateContainer()
-	},
-}
-
-var configUseFileCmd = &cobra.Command{
-	Use:   "use-file <path>",
-	Short: "Use a custom containers configuration file",
-	Long: `Configure dackup to read containers from a custom file.
-
-The custom file path is stored in the main dackup config file, usually ~/.config/dackup/config.json.`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runConfigUseFile(args[0])
-	},
-}
-
-func init() {
 	var err error
-	configFilePath, err = defaultDackupConfigPath()
+	configFilePath, err = shared.DefaultDackupConfigPath()
 	if err != nil {
 		configFilePath = "config.json"
 	}
 
-	rootCmd.AddCommand(configCmd)
+	configCmd := &cobra.Command{
+		Use:   "config",
+		Short: "Manage dackup configuration",
+		Long:  "Create and update the dackup configuration file used by the backup command.",
+	}
+
+	configInitCmd := &cobra.Command{
+		Use:   "init",
+		Short: "Create the dackup configuration file",
+		Long:  "Interactively create the dackup configuration file containing containers, backup paths, and stop settings.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runConfigInit()
+		},
+	}
+
+	configAddContainerCmd := &cobra.Command{
+		Use:   "add",
+		Short: "Add a container to the dackup configuration",
+		Long:  "Interactively add a container entry to the active dackup configuration file.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runConfigAddContainer()
+		},
+	}
+
+	configUpdateContainerCmd := &cobra.Command{
+		Use:   "update",
+		Short: "Update a container in the dackup configuration",
+		Long:  "List existing containers, then interactively update one container entry in the active dackup configuration file.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runConfigUpdateContainer()
+		},
+	}
+
+	configUseFileCmd := &cobra.Command{
+		Use:   "use-file <path>",
+		Short: "Use a custom containers configuration file",
+		Long: `Configure dackup to read containers from a custom file.
+
+The custom file path is stored in the main dackup config file, usually ~/.config/dackup/config.json.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runConfigUseFile(args[0])
+		},
+	}
 
 	configCmd.PersistentFlags().StringVar(
 		&configFilePath,
@@ -77,12 +86,14 @@ func init() {
 	configCmd.AddCommand(configAddContainerCmd)
 	configCmd.AddCommand(configUpdateContainerCmd)
 	configCmd.AddCommand(configUseFileCmd)
+
+	return configCmd
 }
 
 func runConfigInit() error {
 	reader := bufio.NewReader(os.Stdin)
 
-	if fileExists(configFilePath) {
+	if shared.FileExists(configFilePath) {
 		overwrite, err := askBool(
 			reader,
 			fmt.Sprintf("Configuration file already exists at %s. Overwrite it?", configFilePath),
@@ -108,12 +119,12 @@ func runConfigInit() error {
 		return err
 	}
 
-	backupSourceDir, err := askStringWithDefault(reader, "Backup source root directory", backupSrcDir)
+	backupSourceDir, err := askStringWithDefault(reader, "Backup source root directory", defaultBackupSrcDir)
 	if err != nil {
 		return err
 	}
 
-	backupDestinationDir, err := askStringWithDefault(reader, "Backup destination root directory", backupDstDir)
+	backupDestinationDir, err := askStringWithDefault(reader, "Backup destination root directory", defaultBackupDstDir)
 	if err != nil {
 		return err
 	}
@@ -134,7 +145,7 @@ func runConfigInit() error {
 			return err
 		}
 
-		mainConfig := dackupConfig{
+		mainConfig := shared.DackupConfig{
 			User:         owner,
 			Group:        group,
 			ConfigFile:   customPath,
@@ -142,11 +153,11 @@ func runConfigInit() error {
 			BackupDstDir: backupDestinationDir,
 		}
 
-		if err := writeDackupConfig(configFilePath, mainConfig); err != nil {
+		if err := shared.WriteDackupConfig(configFilePath, mainConfig, options); err != nil {
 			return err
 		}
 
-		if !fileExists(customPath) {
+		if !shared.FileExists(customPath) {
 			createCustom, err := askBool(
 				reader,
 				fmt.Sprintf("Custom file does not exist at %s. Create it now?", customPath),
@@ -162,7 +173,7 @@ func runConfigInit() error {
 					return err
 				}
 
-				if err := writeContainerConfigsToPath(customPath, containers); err != nil {
+				if err := shared.WriteContainerConfigsToPath(customPath, containers, options); err != nil {
 					return err
 				}
 			}
@@ -178,7 +189,7 @@ func runConfigInit() error {
 		return err
 	}
 
-	config := dackupConfig{
+	config := shared.DackupConfig{
 		User:         owner,
 		Group:        group,
 		BackupSrcDir: backupSourceDir,
@@ -186,7 +197,7 @@ func runConfigInit() error {
 		Containers:   containers,
 	}
 
-	if err := writeDackupConfig(configFilePath, config); err != nil {
+	if err := shared.WriteDackupConfig(configFilePath, config, options); err != nil {
 		return err
 	}
 
@@ -197,7 +208,7 @@ func runConfigInit() error {
 func runConfigAddContainer() error {
 	reader := bufio.NewReader(os.Stdin)
 
-	effectiveConfigPath, err := effectiveContainersConfigPath(configFilePath)
+	effectiveConfigPath, err := shared.EffectiveContainersConfigPath(configFilePath)
 	if err != nil {
 		return err
 	}
@@ -220,7 +231,7 @@ func runConfigAddContainer() error {
 
 	configs = append(configs, config)
 
-	if err := writeContainerConfigsToPath(effectiveConfigPath, configs); err != nil {
+	if err := shared.WriteContainerConfigsToPath(effectiveConfigPath, configs, options); err != nil {
 		return err
 	}
 
@@ -231,7 +242,7 @@ func runConfigAddContainer() error {
 func runConfigUpdateContainer() error {
 	reader := bufio.NewReader(os.Stdin)
 
-	effectiveConfigPath, err := effectiveContainersConfigPath(configFilePath)
+	effectiveConfigPath, err := shared.EffectiveContainersConfigPath(configFilePath)
 	if err != nil {
 		return err
 	}
@@ -274,7 +285,7 @@ func runConfigUpdateContainer() error {
 
 	configs[selectedIndex] = updatedConfig
 
-	if err := writeContainerConfigsToPath(effectiveConfigPath, configs); err != nil {
+	if err := shared.WriteContainerConfigsToPath(effectiveConfigPath, configs, options); err != nil {
 		return err
 	}
 
@@ -293,10 +304,10 @@ func runConfigUseFile(customPath string) error {
 		return err
 	}
 
-	mainConfig := dackupConfig{}
+	mainConfig := shared.DackupConfig{}
 
-	if fileExists(configFilePath) {
-		config, err := readDackupConfig(configFilePath)
+	if shared.FileExists(configFilePath) {
+		config, err := shared.ReadDackupConfig(configFilePath)
 		if err != nil {
 			return err
 		}
@@ -321,14 +332,14 @@ func runConfigUseFile(customPath string) error {
 	}
 
 	if strings.TrimSpace(mainConfig.BackupSrcDir) == "" {
-		mainConfig.BackupSrcDir, err = askStringWithDefault(reader, "Backup source root directory", backupSrcDir)
+		mainConfig.BackupSrcDir, err = askStringWithDefault(reader, "Backup source root directory", defaultBackupSrcDir)
 		if err != nil {
 			return err
 		}
 	}
 
 	if strings.TrimSpace(mainConfig.BackupDstDir) == "" {
-		mainConfig.BackupDstDir, err = askStringWithDefault(reader, "Backup destination root directory", backupDstDir)
+		mainConfig.BackupDstDir, err = askStringWithDefault(reader, "Backup destination root directory", defaultBackupDstDir)
 		if err != nil {
 			return err
 		}
@@ -337,12 +348,12 @@ func runConfigUseFile(customPath string) error {
 	mainConfig.ConfigFile = normalizedPath
 	mainConfig.Containers = nil
 
-	if err := writeDackupConfig(configFilePath, mainConfig); err != nil {
+	if err := shared.WriteDackupConfig(configFilePath, mainConfig, options); err != nil {
 		return err
 	}
 
-	if !fileExists(normalizedPath) {
-		if err := writeContainerConfigsToPath(normalizedPath, []containerConfig{}); err != nil {
+	if !shared.FileExists(normalizedPath) {
+		if err := shared.WriteContainerConfigsToPath(normalizedPath, []shared.ContainerConfig{}, options); err != nil {
 			return err
 		}
 	}
@@ -353,8 +364,8 @@ func runConfigUseFile(customPath string) error {
 	return nil
 }
 
-func askContainers(reader *bufio.Reader) ([]containerConfig, error) {
-	var configs []containerConfig
+func askContainers(reader *bufio.Reader) ([]shared.ContainerConfig, error) {
+	var configs []shared.ContainerConfig
 
 	fmt.Println("Creating dackup containers configuration.")
 	fmt.Println("You will now be asked to add containers.")
@@ -383,28 +394,28 @@ func askContainers(reader *bufio.Reader) ([]containerConfig, error) {
 	return configs, nil
 }
 
-func askContainerConfig(reader *bufio.Reader) (containerConfig, error) {
+func askContainerConfig(reader *bufio.Reader) (shared.ContainerConfig, error) {
 	container, err := askRequiredString(reader, "Container name")
 	if err != nil {
-		return containerConfig{}, err
+		return shared.ContainerConfig{}, err
 	}
 
 	toStop, err := askBool(reader, "Stop this container before backup?", false)
 	if err != nil {
-		return containerConfig{}, err
+		return shared.ContainerConfig{}, err
 	}
 
 	paths, err := askStringList(reader, "Backup paths, separated by commas. Leave empty if none")
 	if err != nil {
-		return containerConfig{}, err
+		return shared.ContainerConfig{}, err
 	}
 
 	contains, err := askStringList(reader, "Contained/dependent containers, separated by commas. Leave empty if none")
 	if err != nil {
-		return containerConfig{}, err
+		return shared.ContainerConfig{}, err
 	}
 
-	config := containerConfig{
+	config := shared.ContainerConfig{
 		Container: container,
 		ToStop:    toStop,
 	}
@@ -420,13 +431,16 @@ func askContainerConfig(reader *bufio.Reader) (containerConfig, error) {
 	return config, nil
 }
 
-func askUpdatedContainerConfig(reader *bufio.Reader, currentConfig containerConfig) (containerConfig, error) {
+func askUpdatedContainerConfig(
+	reader *bufio.Reader,
+	currentConfig shared.ContainerConfig,
+) (shared.ContainerConfig, error) {
 	fmt.Printf("Updating container %q. Press Enter to keep the current value.\n", currentConfig.Container)
 	fmt.Println()
 
 	container, err := askStringWithDefault(reader, "Container name", currentConfig.Container)
 	if err != nil {
-		return containerConfig{}, err
+		return shared.ContainerConfig{}, err
 	}
 
 	toStop, err := askBool(
@@ -435,20 +449,20 @@ func askUpdatedContainerConfig(reader *bufio.Reader, currentConfig containerConf
 		currentConfig.ToStop,
 	)
 	if err != nil {
-		return containerConfig{}, err
+		return shared.ContainerConfig{}, err
 	}
 
 	paths, err := askStringListWithDefault(reader, "Backup paths, separated by commas", currentConfig.Paths)
 	if err != nil {
-		return containerConfig{}, err
+		return shared.ContainerConfig{}, err
 	}
 
 	contains, err := askStringListWithDefault(reader, "Contained/dependent containers, separated by commas", currentConfig.Contains)
 	if err != nil {
-		return containerConfig{}, err
+		return shared.ContainerConfig{}, err
 	}
 
-	updatedConfig := containerConfig{
+	updatedConfig := shared.ContainerConfig{
 		Container: container,
 		ToStop:    toStop,
 	}
@@ -592,8 +606,8 @@ func parseStringList(value string) []string {
 	return items
 }
 
-func readExistingContainerConfigs(path string) ([]containerConfig, error) {
-	if !fileExists(path) {
+func readExistingContainerConfigs(path string) ([]shared.ContainerConfig, error) {
+	if !shared.FileExists(path) {
 		create, err := askCreateMissingConfig(path)
 		if err != nil {
 			return nil, err
@@ -603,14 +617,14 @@ func readExistingContainerConfigs(path string) ([]containerConfig, error) {
 			return nil, fmt.Errorf("configuration file does not exist: %s", path)
 		}
 
-		if err := writeContainerConfigsToPath(path, []containerConfig{}); err != nil {
+		if err := shared.WriteContainerConfigsToPath(path, []shared.ContainerConfig{}, options); err != nil {
 			return nil, err
 		}
 
-		return []containerConfig{}, nil
+		return []shared.ContainerConfig{}, nil
 	}
 
-	return readContainerConfigsFromPath(path)
+	return shared.ReadContainerConfigsFromPath(path)
 }
 
 func askCreateMissingConfig(path string) (bool, error) {
@@ -618,7 +632,7 @@ func askCreateMissingConfig(path string) (bool, error) {
 	return askBool(reader, fmt.Sprintf("Configuration file does not exist at %s. Create it?", path), true)
 }
 
-func printContainers(configs []containerConfig) {
+func printContainers(configs []shared.ContainerConfig) {
 	fmt.Println("Existing containers:")
 	fmt.Println()
 
@@ -642,7 +656,7 @@ func printContainers(configs []containerConfig) {
 	}
 }
 
-func findContainerIndex(configs []containerConfig, containerName string) int {
+func findContainerIndex(configs []shared.ContainerConfig, containerName string) int {
 	containerName = strings.TrimSpace(containerName)
 
 	for index, config := range configs {
@@ -679,9 +693,4 @@ func normalizeConfigPath(path string) (string, error) {
 	}
 
 	return path, nil
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }

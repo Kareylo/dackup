@@ -1,6 +1,12 @@
 package cmd
 
-import "testing"
+import (
+	"dackup/cmd/backup"
+	"dackup/cmd/config"
+	"dackup/cmd/restore"
+	"dackup/internal/shared"
+	"testing"
+)
 
 func TestRootCommandHasExpectedSubcommands(t *testing.T) {
 	expectedCommands := []string{
@@ -28,6 +34,8 @@ func TestRootCommandHasExpectedSubcommands(t *testing.T) {
 }
 
 func TestConfigCommandHasExpectedSubcommands(t *testing.T) {
+	configCmd := config.NewCommand(&shared.Options{})
+
 	expectedCommands := []string{
 		"init",
 		"add",
@@ -54,18 +62,33 @@ func TestConfigCommandHasExpectedSubcommands(t *testing.T) {
 }
 
 func TestBackupCommandAcceptsArbitraryArgs(t *testing.T) {
+	backupCmd := backup.NewCommand(&shared.Options{})
+
 	if err := backupCmd.Args(backupCmd, []string{"paperless", "adguard"}); err != nil {
 		t.Fatalf("backup command should accept arbitrary args, got error: %v", err)
 	}
 }
 
 func TestRestoreCommandAcceptsArbitraryArgs(t *testing.T) {
+	restoreCmd := restore.NewCommand(&shared.Options{})
+
 	if err := restoreCmd.Args(restoreCmd, []string{"paperless", "adguard"}); err != nil {
 		t.Fatalf("restore command should accept arbitrary args, got error: %v", err)
 	}
 }
 
 func TestConfigUseFileRequiresOneArg(t *testing.T) {
+	configCmd := config.NewCommand(&shared.Options{})
+
+	configUseFileCmd, _, err := configCmd.Find([]string{"use-file"})
+	if err != nil {
+		t.Fatalf("configCmd.Find returned error: %v", err)
+	}
+
+	if configUseFileCmd == nil {
+		t.Fatal("expected use-file command to exist")
+	}
+
 	if err := configUseFileCmd.Args(configUseFileCmd, nil); err == nil {
 		t.Fatal("expected error with no args")
 	}

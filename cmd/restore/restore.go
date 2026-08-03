@@ -1,6 +1,8 @@
-package cmd
+package restore
 
 import (
+	"dackup/cmd/backup"
+	"dackup/internal/shared"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,12 +17,22 @@ var (
 	restoreSrcDir     = "/backups/in"
 	restoreDstDir     = "/opt/apps_docker"
 	restoreLogFile    = "/var/log/docker-restore.log"
+	options           *shared.Options
 )
 
-var restoreCmd = &cobra.Command{
-	Use:   "restore [container] [container2] ...",
-	Short: "Restore Docker application data with rsync",
-	Long: `Stop selected Docker containers, restore configured Docker application paths,
+func NewCommand(sharedOptions *shared.Options) *cobra.Command {
+	options = sharedOptions
+
+	var err error
+	restoreConfigFile, err = shared.DefaultDackupConfigPath()
+	if err != nil {
+		restoreConfigFile = "config.json"
+	}
+
+	restoreCmd := &cobra.Command{
+		Use:   "restore [container] [container2] ...",
+		Short: "Restore Docker application data with rsync",
+		Long: `Stop selected Docker containers, restore configured Docker application paths,
 fix restored ownership, and restart only the containers that were actually stopped.
 
 When no container is specified, all configured containers are restored.
@@ -29,29 +41,22 @@ Examples:
   sudo dackup restore
   sudo dackup restore paperless
   sudo dackup restore paperless adguard`,
-	Args: cobra.ArbitraryArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runRestore(
-			args,
-			cmd.Flags().Changed("src-dir"),
-			cmd.Flags().Changed("dst-dir"),
-		)
-	},
-}
-
-func init() {
-	var err error
-	restoreConfigFile, err = defaultDackupConfigPath()
-	if err != nil {
-		restoreConfigFile = "config.json"
+		Args: cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRestore(
+				args,
+				cmd.Flags().Changed("src-dir"),
+				cmd.Flags().Changed("dst-dir"),
+			)
+		},
 	}
-
-	rootCmd.AddCommand(restoreCmd)
 
 	restoreCmd.Flags().StringVar(&restoreConfigFile, "config-file", restoreConfigFile, "main dackup config file")
 	restoreCmd.Flags().StringVar(&restoreSrcDir, "src-dir", restoreSrcDir, "restore source root directory")
 	restoreCmd.Flags().StringVar(&restoreDstDir, "dst-dir", restoreDstDir, "restore destination root directory")
 	restoreCmd.Flags().StringVar(&restoreLogFile, "log-file", restoreLogFile, "restore log file path")
+
+	return restoreCmd
 }
 
 func runRestore(requestedContainers []string, srcDirFlagChanged bool, dstDirFlagChanged bool) error {
@@ -59,7 +64,7 @@ func runRestore(requestedContainers []string, srcDirFlagChanged bool, dstDirFlag
 		return fmt.Errorf("this command requires root privileges; run it with sudo")
 	}
 
-	config, effectiveConfigPath, err := effectiveDackupConfig(restoreConfigFile)
+	config, effectiveConfigPath, err := shared.EffectiveDackupConfig(restoreConfigFile)
 	if err != nil {
 		return err
 	}
@@ -98,7 +103,7 @@ func runRestore(requestedContainers []string, srcDirFlagChanged bool, dstDirFlag
 	return nil
 }
 
-func applyRestoreDirectoryConfig(config dackupConfig, srcDirFlagChanged bool, dstDirFlagChanged bool) {
+func applyRestoreDirectoryConfig(config shared.DackupConfig, srcDirFlagChanged bool, dstDirFlagChanged bool) {
 	if !srcDirFlagChanged && strings.TrimSpace(config.BackupDstDir) != "" {
 		restoreSrcDir = config.BackupDstDir
 	}
@@ -108,7 +113,11 @@ func applyRestoreDirectoryConfig(config dackupConfig, srcDirFlagChanged bool, ds
 	}
 }
 
-func restorePreflightChecks(effectiveConfigPath string, config dackupConfig, configs []containerConfig) error {
+func restorePreflightChecks(
+	effectiveConfigPath string,
+	config shared.DackupConfig,
+	configs []shared.ContainerConfig,
+) error {
 	if _, err := os.Stat(effectiveConfigPath); err != nil {
 		return fmt.Errorf("config file not found: %s", effectiveConfigPath)
 	}
@@ -157,12 +166,15 @@ func restorePreflightChecks(effectiveConfigPath string, config dackupConfig, con
 	return nil
 }
 
-func filterConfigsForRestore(configs []containerConfig, requestedContainers []string) ([]containerConfig, error) {
+func filterConfigsForRestore(
+	configs []shared.ContainerConfig,
+	requestedContainers []string,
+) ([]shared.ContainerConfig, error) {
 	if len(requestedContainers) == 0 {
 		return configs, nil
 	}
 
-	configByContainer := make(map[string]containerConfig)
+	configByContainer := make(map[string]shared.ContainerConfig)
 	for _, config := range configs {
 		configByContainer[config.Container] = config
 	}
@@ -182,7 +194,7 @@ func filterConfigsForRestore(configs []containerConfig, requestedContainers []st
 		selectContainerAndContainedForRestore(requestedContainer, configByContainer, selected)
 	}
 
-	var filteredConfigs []containerConfig
+	var filteredConfigs []shared.ContainerConfig
 	for _, config := range configs {
 		if selected[config.Container] {
 			filteredConfigs = append(filteredConfigs, config)
@@ -198,7 +210,7 @@ func filterConfigsForRestore(configs []containerConfig, requestedContainers []st
 
 func selectContainerAndContainedForRestore(
 	containerName string,
-	configByContainer map[string]containerConfig,
+	configByContainer map[string]shared.ContainerConfig,
 	selected map[string]bool,
 ) {
 	containerName = strings.TrimSpace(containerName)
@@ -223,7 +235,7 @@ func selectContainerAndContainedForRestore(
 	}
 }
 
-func restoreContainersToStopFromConfig(configs []containerConfig) []string {
+func restoreContainersToStopFromConfig(configs []shared.ContainerConfig) []string {
 	seen := make(map[string]bool)
 	var containers []string
 
@@ -263,7 +275,7 @@ func restoreStopRunningContainers(containers []string) ([]string, error) {
 	var stoppedContainers []string
 
 	for _, container := range containers {
-		running, err := dockerContainerRunning(container)
+		running, err := backup.DockerContainerRunning(container)
 		if err != nil {
 			restoreLogMessage("ERROR", fmt.Sprintf("Failed to inspect container %s: %v", container, err))
 			continue
@@ -276,7 +288,7 @@ func restoreStopRunningContainers(containers []string) ([]string, error) {
 
 		restoreLogMessage("INFO", fmt.Sprintf("Stopping container: %s", container))
 
-		if dryRun {
+		if options != nil && options.DryRun {
 			restoreLogMessage("INFO", fmt.Sprintf("[dry-run] Would stop container %s", container))
 			stoppedContainers = append(stoppedContainers, container)
 			continue
@@ -294,7 +306,7 @@ func restoreStopRunningContainers(containers []string) ([]string, error) {
 	return stoppedContainers, nil
 }
 
-func runConfiguredRestores(configs []containerConfig) error {
+func runConfiguredRestores(configs []shared.ContainerConfig) error {
 	restoreLogMessage("INFO", fmt.Sprintf("Starting configured restores from %s to %s ...", restoreSrcDir, restoreDstDir))
 
 	restoredPaths := make(map[string]bool)
@@ -335,7 +347,7 @@ func runConfiguredRestores(configs []containerConfig) error {
 func restoreSinglePath(container string, srcPath string, dstPath string) error {
 	restoreLogMessage("INFO", fmt.Sprintf("Restoring %s for container %s to %s ...", srcPath, container, dstPath))
 
-	if dryRun {
+	if options != nil && options.DryRun {
 		restoreLogMessage("INFO", fmt.Sprintf("[dry-run] Would create destination directory %s", dstPath))
 		restoreLogMessage("INFO", fmt.Sprintf("[dry-run] Would run rsync -a --delete %s/ %s/", srcPath, dstPath))
 		return nil
@@ -356,7 +368,7 @@ func restoreSinglePath(container string, srcPath string, dstPath string) error {
 	return nil
 }
 
-func fixRestoreOwnership(configs []containerConfig, owner string, group string) error {
+func fixRestoreOwnership(configs []shared.ContainerConfig, owner string, group string) error {
 	restoreLogMessage("INFO", fmt.Sprintf("Setting ownership of restored paths to %s:%s ...", owner, group))
 
 	changedPaths := make(map[string]bool)
@@ -370,7 +382,7 @@ func fixRestoreOwnership(configs []containerConfig, owner string, group string) 
 
 			dstPath := restoreDestinationPath(cleanPath)
 
-			if dryRun {
+			if options != nil && options.DryRun {
 				restoreLogMessage("INFO", fmt.Sprintf("[dry-run] Would run chown -R %s:%s %s", owner, group, dstPath))
 				changedPaths[cleanPath] = true
 				continue
@@ -397,7 +409,7 @@ func restoreStartStoppedContainers(stoppedContainers []string) error {
 	}
 
 	for _, container := range stoppedContainers {
-		exists, err := dockerContainerExists(container)
+		exists, err := backup.DockerContainerExists(container)
 		if err != nil {
 			restoreLogMessage("ERROR", fmt.Sprintf("Failed to inspect container %s: %v", container, err))
 			continue
@@ -410,7 +422,7 @@ func restoreStartStoppedContainers(stoppedContainers []string) error {
 
 		restoreLogMessage("INFO", fmt.Sprintf("Starting container: %s", container))
 
-		if dryRun {
+		if options != nil && options.DryRun {
 			restoreLogMessage("INFO", fmt.Sprintf("[dry-run] Would start container %s", container))
 			continue
 		}
@@ -452,7 +464,7 @@ func restoreRunLoggedCommand(name string, args ...string) error {
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 
-	if verbose {
+	if options != nil && options.Verbose {
 		fmt.Printf("Running: %s %s\n", name, strings.Join(args, " "))
 	}
 
@@ -460,8 +472,8 @@ func restoreRunLoggedCommand(name string, args ...string) error {
 }
 
 func restoreLogMessage(level string, message string) {
-	previousBackupLogFile := backupLogFile
-	backupLogFile = restoreLogFile
-	logMessage(level, message)
-	backupLogFile = previousBackupLogFile
+	restoreBackupLogFile := backup.SetLogFile(restoreLogFile)
+	defer restoreBackupLogFile()
+
+	backup.LogMessage(level, message)
 }

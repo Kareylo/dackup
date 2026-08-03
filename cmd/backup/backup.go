@@ -1,7 +1,8 @@
-package cmd
+package backup
 
 import (
 	"bufio"
+	"dackup/internal/shared"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,24 +13,27 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type containerConfig struct {
-	Container string   `json:"container"`
-	ToStop    bool     `json:"to_stop"`
-	Paths     []string `json:"paths,omitempty"`
-	Contains  []string `json:"contains,omitempty"`
-}
-
 var (
 	backupJSONFile string
 	backupSrcDir   = "/opt/apps_docker"
 	backupDstDir   = "/backups/in"
 	backupLogFile  = "/var/log/docker-backup.log"
+	options        *shared.Options
 )
 
-var backupCmd = &cobra.Command{
-	Use:   "backup [container] [container2] ...",
-	Short: "Back up Docker application data with rsync",
-	Long: `Stop selected Docker containers, back up configured Docker application paths,
+func NewCommand(sharedOptions *shared.Options) *cobra.Command {
+	options = sharedOptions
+
+	var err error
+	backupJSONFile, err = shared.DefaultDackupConfigPath()
+	if err != nil {
+		backupJSONFile = "config.json"
+	}
+
+	backupCmd := &cobra.Command{
+		Use:   "backup [container] [container2] ...",
+		Short: "Back up Docker application data with rsync",
+		Long: `Stop selected Docker containers, back up configured Docker application paths,
 fix backup ownership, and restart only the containers that were actually stopped.
 
 When no container is specified, all configured containers are backed up.
@@ -38,29 +42,22 @@ Examples:
   sudo dackup backup
   sudo dackup backup paperless
   sudo dackup backup paperless adguard`,
-	Args: cobra.ArbitraryArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runBackup(
-			args,
-			cmd.Flags().Changed("src-dir"),
-			cmd.Flags().Changed("dst-dir"),
-		)
-	},
-}
-
-func init() {
-	var err error
-	backupJSONFile, err = defaultDackupConfigPath()
-	if err != nil {
-		backupJSONFile = "config.json"
+		Args: cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runBackup(
+				args,
+				cmd.Flags().Changed("src-dir"),
+				cmd.Flags().Changed("dst-dir"),
+			)
+		},
 	}
-
-	rootCmd.AddCommand(backupCmd)
 
 	backupCmd.Flags().StringVar(&backupJSONFile, "config-file", backupJSONFile, "main dackup config file")
 	backupCmd.Flags().StringVar(&backupSrcDir, "src-dir", backupSrcDir, "source root directory")
 	backupCmd.Flags().StringVar(&backupDstDir, "dst-dir", backupDstDir, "destination backup root directory")
 	backupCmd.Flags().StringVar(&backupLogFile, "log-file", backupLogFile, "log file path")
+
+	return backupCmd
 }
 
 func runBackup(requestedContainers []string, srcDirFlagChanged bool, dstDirFlagChanged bool) error {
@@ -68,7 +65,7 @@ func runBackup(requestedContainers []string, srcDirFlagChanged bool, dstDirFlagC
 		return fmt.Errorf("this command requires root privileges; run it with sudo")
 	}
 
-	config, effectiveConfigPath, err := effectiveDackupConfig(backupJSONFile)
+	config, effectiveConfigPath, err := shared.EffectiveDackupConfig(backupJSONFile)
 	if err != nil {
 		return err
 	}
@@ -114,7 +111,7 @@ func runBackup(requestedContainers []string, srcDirFlagChanged bool, dstDirFlagC
 	return nil
 }
 
-func applyBackupDirectoryConfig(config dackupConfig, srcDirFlagChanged bool, dstDirFlagChanged bool) {
+func applyBackupDirectoryConfig(config shared.DackupConfig, srcDirFlagChanged bool, dstDirFlagChanged bool) {
 	if !srcDirFlagChanged && strings.TrimSpace(config.BackupSrcDir) != "" {
 		backupSrcDir = config.BackupSrcDir
 	}
@@ -124,12 +121,12 @@ func applyBackupDirectoryConfig(config dackupConfig, srcDirFlagChanged bool, dst
 	}
 }
 
-func filterConfigsForBackup(configs []containerConfig, requestedContainers []string) ([]containerConfig, error) {
+func filterConfigsForBackup(configs []shared.ContainerConfig, requestedContainers []string) ([]shared.ContainerConfig, error) {
 	if len(requestedContainers) == 0 {
 		return configs, nil
 	}
 
-	configByContainer := make(map[string]containerConfig)
+	configByContainer := make(map[string]shared.ContainerConfig)
 	for _, config := range configs {
 		configByContainer[config.Container] = config
 	}
@@ -149,7 +146,7 @@ func filterConfigsForBackup(configs []containerConfig, requestedContainers []str
 		selectContainerAndContainedForBackup(requestedContainer, configByContainer, selected)
 	}
 
-	var filteredConfigs []containerConfig
+	var filteredConfigs []shared.ContainerConfig
 	for _, config := range configs {
 		if selected[config.Container] {
 			filteredConfigs = append(filteredConfigs, config)
@@ -165,7 +162,7 @@ func filterConfigsForBackup(configs []containerConfig, requestedContainers []str
 
 func selectContainerAndContainedForBackup(
 	containerName string,
-	configByContainer map[string]containerConfig,
+	configByContainer map[string]shared.ContainerConfig,
 	selected map[string]bool,
 ) {
 	containerName = strings.TrimSpace(containerName)
@@ -190,7 +187,7 @@ func selectContainerAndContainedForBackup(
 	}
 }
 
-func preflightChecks(effectiveConfigPath string, config dackupConfig, configs []containerConfig) error {
+func preflightChecks(effectiveConfigPath string, config shared.DackupConfig, configs []shared.ContainerConfig) error {
 	if _, err := os.Stat(effectiveConfigPath); err != nil {
 		return fmt.Errorf("config file not found: %s", effectiveConfigPath)
 	}
@@ -239,7 +236,7 @@ func preflightChecks(effectiveConfigPath string, config dackupConfig, configs []
 	return nil
 }
 
-func containersToStopFromConfig(configs []containerConfig) []string {
+func containersToStopFromConfig(configs []shared.ContainerConfig) []string {
 	seen := make(map[string]bool)
 	var containers []string
 
@@ -279,7 +276,7 @@ func stopRunningContainers(containers []string) ([]string, error) {
 	var stoppedContainers []string
 
 	for _, container := range containers {
-		running, err := dockerContainerRunning(container)
+		running, err := DockerContainerRunning(container)
 		if err != nil {
 			logMessage("ERROR", fmt.Sprintf("Failed to inspect container %s: %v", container, err))
 			continue
@@ -292,7 +289,7 @@ func stopRunningContainers(containers []string) ([]string, error) {
 
 		logMessage("INFO", fmt.Sprintf("Stopping container: %s", container))
 
-		if dryRun {
+		if options != nil && options.DryRun {
 			logMessage("INFO", fmt.Sprintf("[dry-run] Would stop container %s", container))
 			stoppedContainers = append(stoppedContainers, container)
 			continue
@@ -310,7 +307,7 @@ func stopRunningContainers(containers []string) ([]string, error) {
 	return stoppedContainers, nil
 }
 
-func runConfiguredBackups(configs []containerConfig) error {
+func runConfiguredBackups(configs []shared.ContainerConfig) error {
 	logMessage("INFO", fmt.Sprintf("Starting configured backups from %s to %s ...", backupSrcDir, backupDstDir))
 
 	backedUpPaths := make(map[string]bool)
@@ -351,7 +348,7 @@ func runConfiguredBackups(configs []containerConfig) error {
 func backupSinglePath(container string, srcPath string, dstPath string) error {
 	logMessage("INFO", fmt.Sprintf("Backing up %s for container %s to %s ...", srcPath, container, dstPath))
 
-	if dryRun {
+	if options != nil && options.DryRun {
 		logMessage("INFO", fmt.Sprintf("[dry-run] Would create destination directory %s", dstPath))
 		logMessage("INFO", fmt.Sprintf("[dry-run] Would run rsync -a --delete %s/ %s/", srcPath, dstPath))
 		return nil
@@ -375,7 +372,7 @@ func backupSinglePath(container string, srcPath string, dstPath string) error {
 func fixBackupOwnership(owner string, group string) error {
 	logMessage("INFO", fmt.Sprintf("Setting ownership of %s to %s:%s ...", backupDstDir, owner, group))
 
-	if dryRun {
+	if options != nil && options.DryRun {
 		logMessage("INFO", fmt.Sprintf("[dry-run] Would run chown -R %s:%s %s", owner, group, backupDstDir))
 		return nil
 	}
@@ -397,7 +394,7 @@ func restartStoppedContainers(stoppedContainers []string) error {
 	}
 
 	for _, container := range stoppedContainers {
-		exists, err := dockerContainerExists(container)
+		exists, err := DockerContainerExists(container)
 		if err != nil {
 			logMessage("ERROR", fmt.Sprintf("Failed to inspect container %s: %v", container, err))
 			continue
@@ -410,7 +407,7 @@ func restartStoppedContainers(stoppedContainers []string) error {
 
 		logMessage("INFO", fmt.Sprintf("Starting container: %s", container))
 
-		if dryRun {
+		if options != nil && options.DryRun {
 			logMessage("INFO", fmt.Sprintf("[dry-run] Would start container %s", container))
 			continue
 		}
@@ -440,7 +437,7 @@ func cleanConfiguredPath(configuredPath string) string {
 	return strings.TrimPrefix(filepath.Clean(configuredPath), string(os.PathSeparator))
 }
 
-func dockerContainerRunning(container string) (bool, error) {
+func DockerContainerRunning(container string) (bool, error) {
 	output, err := exec.Command("docker", "ps", "-q", "-f", fmt.Sprintf("name=^/%s$", container)).Output()
 	if err != nil {
 		return false, err
@@ -449,7 +446,7 @@ func dockerContainerRunning(container string) (bool, error) {
 	return len(output) > 0, nil
 }
 
-func dockerContainerExists(container string) (bool, error) {
+func DockerContainerExists(container string) (bool, error) {
 	output, err := exec.Command("docker", "ps", "-a", "-q", "-f", fmt.Sprintf("name=^/%s$", container)).Output()
 	if err != nil {
 		return false, err
@@ -470,11 +467,24 @@ func runLoggedCommand(name string, args ...string) error {
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 
-	if verbose {
+	if options != nil && options.Verbose {
 		fmt.Printf("Running: %s %s\n", name, strings.Join(args, " "))
 	}
 
 	return cmd.Run()
+}
+
+func LogMessage(level string, message string) {
+	logMessage(level, message)
+}
+
+func SetLogFile(logFile string) func() {
+	previousLogFile := backupLogFile
+	backupLogFile = logFile
+
+	return func() {
+		backupLogFile = previousLogFile
+	}
 }
 
 func logMessage(level string, message string) {

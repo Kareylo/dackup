@@ -1,11 +1,23 @@
-package cmd
+package config
 
 import (
+	"dackup/internal/shared"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 )
+
+func assertPathEqual(t *testing.T, got string, want string) {
+	t.Helper()
+
+	got = filepath.Clean(got)
+	want = filepath.Clean(want)
+
+	if got != want {
+		t.Fatalf("expected path %q, got %q", want, got)
+	}
+}
 
 func TestWriteAndReadDackupConfig(t *testing.T) {
 	tempDir := t.TempDir()
@@ -14,7 +26,7 @@ func TestWriteAndReadDackupConfig(t *testing.T) {
 	want := dackupConfig{
 		User:  "test-user",
 		Group: "test-group",
-		Containers: []containerConfig{
+		Containers: []shared.ContainerConfig{
 			{
 				Container: "paperless",
 				ToStop:    true,
@@ -47,7 +59,7 @@ func TestWriteAndReadContainerConfigsFromPath(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "containers.json")
 
-	want := []containerConfig{
+	want := []shared.ContainerConfig{
 		{
 			Container: "paperless",
 			ToStop:    true,
@@ -93,7 +105,7 @@ func TestEffectiveContainersConfigPath_WhenMainConfigHasNoCustomFile(t *testing.
 	config := dackupConfig{
 		User:  "test-user",
 		Group: "test-group",
-		Containers: []containerConfig{
+		Containers: []shared.ContainerConfig{
 			{
 				Container: "adguard",
 				ToStop:    true,

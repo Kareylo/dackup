@@ -1,9 +1,77 @@
-package cmd
+package restore
 
 import (
+	"dackup/internal/shared"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
+
+func testContainerConfigs() []shared.ContainerConfig {
+	return []shared.ContainerConfig{
+		{
+			Container: "paperless",
+			ToStop:    true,
+			Paths:     []string{"/data/paperless"},
+			Contains:  []string{"paperless_db", "paperless_broker"},
+		},
+		{
+			Container: "paperless_db",
+			ToStop:    true,
+			Paths:     []string{"/data/paperless_db"},
+		},
+		{
+			Container: "paperless_broker",
+			ToStop:    true,
+			Paths:     []string{"/data/paperless_broker"},
+			Contains:  []string{"redis"},
+		},
+		{
+			Container: "redis",
+			ToStop:    true,
+			Paths:     []string{"/data/redis"},
+		},
+		{
+			Container: "paperless_gotenberg",
+			ToStop:    false,
+			Paths:     []string{"/data/paperless_gotenberg"},
+		},
+		{
+			Container: "paperless_tika",
+			ToStop:    false,
+			Paths:     []string{"/data/paperless_tika"},
+		},
+		{
+			Container: "adguard",
+			ToStop:    true,
+			Paths:     []string{"/config/adguard"},
+		},
+	}
+}
+
+func assertContainerNames(t *testing.T, configs []shared.ContainerConfig, want []string) {
+	t.Helper()
+
+	got := make([]string, 0, len(configs))
+	for _, config := range configs {
+		got = append(got, config.Container)
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected container names %#v, got %#v", want, got)
+	}
+}
+
+func assertPathEqual(t *testing.T, got string, want string) {
+	t.Helper()
+
+	got = filepath.Clean(got)
+	want = filepath.Clean(want)
+
+	if got != want {
+		t.Fatalf("expected path %q, got %q", want, got)
+	}
+}
 
 func TestFilterConfigsForRestore_NoRequestedContainersReturnsAll(t *testing.T) {
 	configs := testContainerConfigs()
@@ -43,8 +111,6 @@ func TestFilterConfigsForRestore_SelectsContainedContainersRecursively(t *testin
 		"paperless_db",
 		"paperless_broker",
 		"redis",
-		"paperless_gotenberg",
-		"paperless_tika",
 	}
 
 	assertContainerNames(t, got, wantNames)
@@ -59,13 +125,11 @@ func TestFilterConfigsForRestore_SelectsMultipleRequestedContainers(t *testing.T
 	}
 
 	wantNames := []string{
-		"adguard",
 		"paperless",
 		"paperless_db",
 		"paperless_broker",
 		"redis",
-		"paperless_gotenberg",
-		"paperless_tika",
+		"adguard",
 	}
 
 	assertContainerNames(t, got, wantNames)
@@ -90,7 +154,7 @@ func TestFilterConfigsForRestore_IgnoresEmptyRequestedContainer(t *testing.T) {
 }
 
 func TestRestoreContainersToStopFromConfig(t *testing.T) {
-	configs := []containerConfig{
+	configs := []shared.ContainerConfig{
 		{
 			Container: "paperless",
 			ToStop:    true,
@@ -172,7 +236,7 @@ func TestRestoreCleanConfiguredPath(t *testing.T) {
 }
 
 func TestSelectContainerAndContainedForRestore_HandlesCycles(t *testing.T) {
-	configs := []containerConfig{
+	configs := []shared.ContainerConfig{
 		{
 			Container: "a",
 			Contains:  []string{"b"},
@@ -183,7 +247,7 @@ func TestSelectContainerAndContainedForRestore_HandlesCycles(t *testing.T) {
 		},
 	}
 
-	configByContainer := make(map[string]containerConfig)
+	configByContainer := make(map[string]shared.ContainerConfig)
 	for _, config := range configs {
 		configByContainer[config.Container] = config
 	}
@@ -212,7 +276,7 @@ func TestApplyRestoreDirectoryConfig_UsesBackupConfigValuesInReverseWhenFlagsAre
 	restoreSrcDir = "/default/restore/src"
 	restoreDstDir = "/default/restore/dst"
 
-	config := dackupConfig{
+	config := shared.DackupConfig{
 		BackupSrcDir: "/config/backup/src",
 		BackupDstDir: "/config/backup/dst",
 	}
@@ -239,7 +303,7 @@ func TestApplyRestoreDirectoryConfig_KeepsFlagValuesWhenFlagsAreChanged(t *testi
 	restoreSrcDir = "/flag/restore/src"
 	restoreDstDir = "/flag/restore/dst"
 
-	config := dackupConfig{
+	config := shared.DackupConfig{
 		BackupSrcDir: "/config/backup/src",
 		BackupDstDir: "/config/backup/dst",
 	}
@@ -266,7 +330,7 @@ func TestApplyRestoreDirectoryConfig_IgnoresEmptyConfigValues(t *testing.T) {
 	restoreSrcDir = "/default/restore/src"
 	restoreDstDir = "/default/restore/dst"
 
-	config := dackupConfig{
+	config := shared.DackupConfig{
 		BackupSrcDir: "",
 		BackupDstDir: "   ",
 	}
