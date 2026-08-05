@@ -179,28 +179,33 @@ The current implementation uses `rsync`, but `rsync` is considered an implementa
 
 The backup workflow is:
 
-```text
-Stop containers
-        ↓
-TransferService (currently rsync)
-        ↓
-Start containers
-        ↓
-BackupBackend
+```mermaid
+flowchart TD
+    A[Stop Containers]
+    B[TransferService]
+    C[Start Containers]
+    D[BackupBackend]
+
+    A --> B --> C --> D
+
+    E[rsync]
+    E -.implements.-> B
 ```
 
 The restore workflow is the inverse:
 
-```text
-RestoreBackend
-        ↓
-Stop containers
-        ↓
-TransferService (currently rsync)
-        ↓
-Fix ownership (if needed)
-        ↓
-Start containers
+```mermaid
+flowchart TD
+    A[RestoreBackend]
+    B[Stop Containers]
+    C[TransferService]
+    D[Fix Ownership]
+    E[Start Containers]
+
+    A --> B --> C --> D --> E
+
+    F[rsync]
+    F -.implements.-> C
 ```
 
 This separation exists because:
