@@ -82,6 +82,18 @@ Update an existing container interactively:
 dackup config update
 ```
 
+Remove an existing container interactively:
+
+```bash
+dackup config remove
+```
+
+List configured containers:
+
+```bash
+dackup config list
+```
+
 Use a custom containers configuration file:
 
 ```bash

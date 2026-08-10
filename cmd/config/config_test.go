@@ -177,3 +177,21 @@ func TestNormalizeConfigPath_ReturnsErrorForEmptyPath(t *testing.T) {
 		t.Fatal("expected error for empty path, got nil")
 	}
 }
+
+func TestContainsString_FindsValue(t *testing.T) {
+	if !containsString([]string{"paperless_db", "paperless_broker"}, "paperless_broker") {
+		t.Fatal("expected containsString to find the value")
+	}
+}
+
+func TestContainsString_ReturnsFalseWhenMissing(t *testing.T) {
+	if containsString([]string{"paperless_db"}, "adguard") {
+		t.Fatal("expected containsString to return false for a missing value")
+	}
+}
+
+func TestContainsString_ReturnsFalseForEmptySlice(t *testing.T) {
+	if containsString(nil, "adguard") {
+		t.Fatal("expected containsString to return false for a nil slice")
+	}
+}

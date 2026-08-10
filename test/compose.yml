@@ -1,0 +1,38 @@
+services:
+  test:
+    image: lscr.io/linuxserver/swag
+    container_name: test
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/London
+      - URL=yourdomain.url
+      - SUBDOMAINS=www,
+      - VALIDATION=http
+    volumes:
+      - /opt/apps_docker/data/test:/config:z
+      - /opt/apps_docker/config/test:/config:z
+  test_db:
+    image: lscr.io/linuxserver/swag
+    container_name: test_db
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/London
+      - URL=yourdomain.url
+      - SUBDOMAINS=www,
+      - VALIDATION=http
+    volumes:
+      - /opt/apps_docker/data/test_db:/config:z
+  test_broker:
+    image: lscr.io/linuxserver/swag
+    container_name: test_broker
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/London
+      - URL=yourdomain.url
+      - SUBDOMAINS=www,
+      - VALIDATION=http
+    volumes:
+      - /opt/apps_docker/data/test_broker:/config:z

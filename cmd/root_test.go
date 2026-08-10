@@ -40,6 +40,8 @@ func TestConfigCommandHasExpectedSubcommands(t *testing.T) {
 		"init",
 		"add",
 		"update",
+		"remove",
+		"list",
 		"use-file",
 	}
 

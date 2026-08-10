@@ -68,6 +68,24 @@ func NewCommand(sharedOptions *shared.Options) *cobra.Command {
 		},
 	}
 
+	configRemoveContainerCmd := &cobra.Command{
+		Use:   "remove",
+		Short: "Remove a container from the dackup configuration",
+		Long:  "List existing containers, then interactively remove one container entry from the active dackup configuration file.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runConfigRemoveContainer()
+		},
+	}
+
+	configListContainersCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List containers in the dackup configuration",
+		Long:  "List all container entries in the active dackup configuration file.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runConfigListContainers()
+		},
+	}
+
 	configUseFileCmd := &cobra.Command{
 		Use:   "use-file <path>",
 		Short: "Use a custom containers configuration file",
@@ -90,6 +108,8 @@ The custom file path is stored in the main dackup config file, usually ~/.config
 	configCmd.AddCommand(configInitCmd)
 	configCmd.AddCommand(configAddContainerCmd)
 	configCmd.AddCommand(configUpdateContainerCmd)
+	configCmd.AddCommand(configRemoveContainerCmd)
+	configCmd.AddCommand(configListContainersCmd)
 	configCmd.AddCommand(configUseFileCmd)
 
 	return configCmd
@@ -310,6 +330,104 @@ func runConfigUpdateContainer() error {
 
 	fmt.Printf("Container %q updated in %s\n", updatedConfig.Container, effectiveConfigPath)
 	return nil
+}
+
+func runConfigRemoveContainer() error {
+	service := newCommandService(bufio.NewReader(os.Stdin))
+
+	effectiveConfigPath, err := shared.EffectiveContainersConfigPath(configFilePath)
+	if err != nil {
+		return err
+	}
+
+	configs, err := service.readExistingContainerConfigs(effectiveConfigPath)
+	if err != nil {
+		return err
+	}
+
+	if len(configs) == 0 {
+		return fmt.Errorf("no containers found in %s", effectiveConfigPath)
+	}
+
+	printContainers(configs)
+
+	selectedContainer, err := service.prompt.RequiredString("Container to remove")
+	if err != nil {
+		return err
+	}
+
+	selectedIndex := findContainerIndex(configs, selectedContainer)
+	if selectedIndex == -1 {
+		return fmt.Errorf("container %q was not found in %s", selectedContainer, effectiveConfigPath)
+	}
+
+	removedContainer := configs[selectedIndex].Container
+
+	confirmRemoval, err := service.prompt.Bool(
+		fmt.Sprintf("Remove container %q from %s?", removedContainer, effectiveConfigPath),
+		false,
+	)
+	if err != nil {
+		return err
+	}
+
+	if !confirmRemoval {
+		fmt.Println("Container removal cancelled.")
+		return nil
+	}
+
+	configs = append(configs[:selectedIndex], configs[selectedIndex+1:]...)
+
+	if err := shared.WriteContainerConfigsToPath(effectiveConfigPath, configs, options); err != nil {
+		return err
+	}
+
+	fmt.Printf("Container %q removed from %s\n", removedContainer, effectiveConfigPath)
+
+	for _, config := range configs {
+		if containsString(config.Contains, removedContainer) {
+			fmt.Printf("Warning: container %q still lists %q in \"contains\"\n", config.Container, removedContainer)
+		}
+	}
+
+	return nil
+}
+
+func runConfigListContainers() error {
+	effectiveConfigPath, err := shared.EffectiveContainersConfigPath(configFilePath)
+	if err != nil {
+		return err
+	}
+
+	if !shared.FileExists(effectiveConfigPath) {
+		fmt.Printf("No configuration file found at %s\n", effectiveConfigPath)
+		return nil
+	}
+
+	configs, err := shared.ReadContainerConfigsFromPath(effectiveConfigPath)
+	if err != nil {
+		return err
+	}
+
+	if len(configs) == 0 {
+		fmt.Printf("No containers configured in %s\n", effectiveConfigPath)
+		return nil
+	}
+
+	fmt.Printf("Configuration file: %s\n\n", effectiveConfigPath)
+	printContainers(configs)
+
+	return nil
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+
+	return false
 }
 
 func runConfigUseFile(customPath string) error {
