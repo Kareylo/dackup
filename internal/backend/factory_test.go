@@ -1,6 +1,9 @@
 package backend
 
-import "testing"
+import (
+	"dackup/internal/backend/default"
+	"testing"
+)
 
 func TestFactory_GetBackend_EmptyNameReturnsDefaultBackend(t *testing.T) {
 	factory := Factory{}
@@ -10,8 +13,8 @@ func TestFactory_GetBackend_EmptyNameReturnsDefaultBackend(t *testing.T) {
 		t.Fatalf("GetBackend returned error: %v", err)
 	}
 
-	if _, ok := got.(DefaultBackend); !ok {
-		t.Fatalf("expected DefaultBackend, got %#v", got)
+	if _, ok := got.(defaultbackend.Backend); !ok {
+		t.Fatalf("expected defaultbackend.Backend, got %#v", got)
 	}
 }
 

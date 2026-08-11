@@ -21,6 +21,9 @@ type commandService struct {
 	prompt  shared.PromptService
 }
 
+// NewCommand builds the "backend" command and its create/show/update/remove
+// subcommands, which manage the Backend/BackendSettings fields on the main
+// dackup config file.
 func NewCommand(sharedOptions *shared.Options) *cobra.Command {
 	options = sharedOptions
 

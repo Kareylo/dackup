@@ -17,6 +17,36 @@ It can stop selected Docker containers, copy configured application directories,
 - Preview actions with `--dry-run`.
 - Enable command output with `--verbose`.
 
+## Workflow
+
+Backup stages data first, then restarts containers before handing off to the backup backend — so a slow backend never extends container downtime:
+
+```mermaid
+---
+title: Backup workflow
+---
+flowchart TD
+    A["Stop configured containers"] --> B["Stage data (rsync src -> dst)"]
+    B --> C["Fix backup ownership"]
+    C --> D["Restart stopped containers"]
+    D --> E["Backend.Backup(stagingDir)"]
+```
+
+Restore is the mirror image, but the backend runs *first* — it pulls data into the staging directory before any container is touched, so the actual downtime-critical stop/stage/start sequence only starts once that data is already on disk:
+
+```mermaid
+---
+title: Restore workflow
+---
+flowchart TD
+    A["Backend.Restore(stagingDir)"] --> B["Stop configured containers"]
+    B --> C["Stage data (rsync dst -> src)"]
+    C --> D["Fix restore ownership"]
+    D --> E["Restart stopped containers"]
+```
+
+The backend step is wired up (`dackup backend create`/`show`/`update`/`remove` manage it), but no concrete backend is implemented yet — until one is, that step always resolves to a no-op.
+
 ## Requirements
 
 - Go 1.26.2 or newer

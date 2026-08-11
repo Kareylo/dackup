@@ -170,7 +170,7 @@ func runBackup(requestedContainers []string, srcDirFlagChanged bool, dstDirFlagC
 	return nil
 }
 
-// resolveBackend constructs the configured Backend (or DefaultBackend if
+// resolveBackend constructs the configured Backend (or the default no-op backend if
 // config.Backend is unset) via internal/backend.Factory, using the same
 // dependencies commandService already builds for TransferService.
 func resolveBackend(service commandService, config shared.DackupConfig) (backend.Backend, error) {

@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"dackup/internal/backend/default"
 	"dackup/internal/shared"
 	"encoding/json"
 	"fmt"
@@ -15,10 +16,14 @@ type Factory struct {
 	Options *shared.Options
 }
 
+// GetBackend resolves name (a DackupConfig.Backend value) and its raw
+// settings into a ready-to-use Backend. An empty name returns
+// defaultbackend.Backend; any other name is looked up against the
+// registered backends and returns an error if none match.
 func (factory Factory) GetBackend(name string, settings json.RawMessage) (Backend, error) {
 	switch name {
 	case "":
-		return DefaultBackend{Logger: factory.Logger}, nil
+		return defaultbackend.Backend{Logger: factory.Logger}, nil
 	default:
 		return nil, fmt.Errorf("unknown backend %q", name)
 	}
