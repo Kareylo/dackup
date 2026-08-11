@@ -296,18 +296,18 @@ func TestApplyRestoreDirectoryConfig_UsesBackupConfigValuesInReverseWhenFlagsAre
 	restoreDstDir = "/default/restore/dst"
 
 	config := shared.DackupConfig{
-		BackupSrcDir: "/config/backup/src",
-		BackupDstDir: "/config/backup/dst",
+		DataDir:    "/config/backup/src",
+		StagingDir: "/config/backup/dst",
 	}
 
 	applyRestoreDirectoryConfig(config, false, false)
 
-	if restoreSrcDir != config.BackupDstDir {
-		t.Fatalf("expected restoreSrcDir %q, got %q", config.BackupDstDir, restoreSrcDir)
+	if restoreSrcDir != config.StagingDir {
+		t.Fatalf("expected restoreSrcDir %q, got %q", config.StagingDir, restoreSrcDir)
 	}
 
-	if restoreDstDir != config.BackupSrcDir {
-		t.Fatalf("expected restoreDstDir %q, got %q", config.BackupSrcDir, restoreDstDir)
+	if restoreDstDir != config.DataDir {
+		t.Fatalf("expected restoreDstDir %q, got %q", config.DataDir, restoreDstDir)
 	}
 }
 
@@ -323,8 +323,8 @@ func TestApplyRestoreDirectoryConfig_KeepsFlagValuesWhenFlagsAreChanged(t *testi
 	restoreDstDir = "/flag/restore/dst"
 
 	config := shared.DackupConfig{
-		BackupSrcDir: "/config/backup/src",
-		BackupDstDir: "/config/backup/dst",
+		DataDir:    "/config/backup/src",
+		StagingDir: "/config/backup/dst",
 	}
 
 	applyRestoreDirectoryConfig(config, true, true)
@@ -350,8 +350,8 @@ func TestApplyRestoreDirectoryConfig_IgnoresEmptyConfigValues(t *testing.T) {
 	restoreDstDir = "/default/restore/dst"
 
 	config := shared.DackupConfig{
-		BackupSrcDir: "",
-		BackupDstDir: "   ",
+		DataDir:    "",
+		StagingDir: "   ",
 	}
 
 	applyRestoreDirectoryConfig(config, false, false)

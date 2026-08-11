@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"dackup/internal/backend/borg"
 	"dackup/internal/backend/default"
 	"testing"
 )
@@ -21,8 +22,44 @@ func TestFactory_GetBackend_EmptyNameReturnsDefaultBackend(t *testing.T) {
 func TestFactory_GetBackend_UnknownNameReturnsError(t *testing.T) {
 	factory := Factory{}
 
-	_, err := factory.GetBackend("borg", nil)
+	_, err := factory.GetBackend("kopia", nil)
 	if err == nil {
 		t.Fatal("expected error for unknown backend name, got nil")
+	}
+}
+
+func TestFactory_GetBackend_BorgWithoutBackendDirReturnsError(t *testing.T) {
+	factory := Factory{}
+
+	_, err := factory.GetBackend(borg.Name, []byte(`{"encryption":"none"}`))
+	if err == nil {
+		t.Fatal("expected error when backend_dir is not set")
+	}
+}
+
+func TestFactory_GetBackend_BorgWithInvalidSettingsReturnsError(t *testing.T) {
+	factory := Factory{BackendDir: "/mnt/backup/borg-repos"}
+
+	_, err := factory.GetBackend(borg.Name, []byte(`{"encryption":"repokey"}`))
+	if err == nil {
+		t.Fatal("expected error when repokey encryption is set without a passphrase")
+	}
+}
+
+func TestFactory_GetBackend_BorgWithValidSettingsReturnsBorgBackend(t *testing.T) {
+	factory := Factory{BackendDir: "/mnt/backup/borg-repos"}
+
+	got, err := factory.GetBackend(borg.Name, []byte(`{"encryption":"none"}`))
+	if err != nil {
+		t.Fatalf("GetBackend returned error: %v", err)
+	}
+
+	borgBackend, ok := got.(borg.Backend)
+	if !ok {
+		t.Fatalf("expected borg.Backend, got %#v", got)
+	}
+
+	if borgBackend.ReposRoot != "/mnt/backup/borg-repos" {
+		t.Fatalf("expected ReposRoot %q, got %q", "/mnt/backup/borg-repos", borgBackend.ReposRoot)
 	}
 }

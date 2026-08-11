@@ -46,6 +46,13 @@ func PreflightChecks(
 		return fmt.Errorf("%s destination directory not found: %s", action, destinationRoot)
 	}
 
+	if strings.TrimSpace(config.BackendDir) != "" {
+		backendInfo, err := fs.Stat(config.BackendDir)
+		if err != nil || !backendInfo.IsDir() {
+			return fmt.Errorf("%s backend directory not found: %s", action, config.BackendDir)
+		}
+	}
+
 	if _, err := runner.LookPath("docker"); err != nil {
 		return fmt.Errorf("docker CLI not found; please install Docker")
 	}

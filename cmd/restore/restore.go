@@ -127,7 +127,12 @@ func runRestore(requestedContainers []string, srcDirFlagChanged bool, dstDirFlag
 		return err
 	}
 
-	if err := restoreBackend.Restore(restoreSrcDir); err != nil {
+	if groupedBackend, ok := restoreBackend.(backend.GroupedBackend); ok {
+		groups := shared.BackendGroupsFromContainerGroups(shared.ContainerGroups(configs))
+		if err := groupedBackend.RestoreGroups(restoreSrcDir, groups); err != nil {
+			return err
+		}
+	} else if err := restoreBackend.Restore(restoreSrcDir); err != nil {
 		return err
 	}
 
@@ -168,21 +173,23 @@ func runRestore(requestedContainers []string, srcDirFlagChanged bool, dstDirFlag
 // dependencies commandService already builds for TransferService.
 func resolveBackend(service commandService, config shared.DackupConfig) (backend.Backend, error) {
 	factory := backend.Factory{
-		Runner:  service.runner,
-		Logger:  service.logger,
-		Options: service.options,
+		Runner:     service.runner,
+		Logger:     service.logger,
+		Options:    service.options,
+		BackendDir: config.BackendDir,
+		Secrets:    shared.AESFileSecretStore{},
 	}
 
 	return factory.GetBackend(config.Backend, config.BackendSettings)
 }
 
 func applyRestoreDirectoryConfig(config shared.DackupConfig, srcDirFlagChanged bool, dstDirFlagChanged bool) {
-	if !srcDirFlagChanged && strings.TrimSpace(config.BackupDstDir) != "" {
-		restoreSrcDir = config.BackupDstDir
+	if !srcDirFlagChanged && strings.TrimSpace(config.StagingDir) != "" {
+		restoreSrcDir = config.StagingDir
 	}
 
-	if !dstDirFlagChanged && strings.TrimSpace(config.BackupSrcDir) != "" {
-		restoreDstDir = config.BackupSrcDir
+	if !dstDirFlagChanged && strings.TrimSpace(config.DataDir) != "" {
+		restoreDstDir = config.DataDir
 	}
 }
 

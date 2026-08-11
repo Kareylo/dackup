@@ -2,8 +2,10 @@ package backend
 
 import "testing"
 
-func TestAvailableBackends_EmptyUntilBackendsAreImplemented(t *testing.T) {
-	if got := AvailableBackends(); len(got) != 0 {
-		t.Fatalf("expected no registered backends yet, got %#v", got)
+func TestAvailableBackends_ListsBorg(t *testing.T) {
+	got := AvailableBackends()
+
+	if len(got) != 1 || got[0] != "borg" {
+		t.Fatalf("expected [\"borg\"], got %#v", got)
 	}
 }

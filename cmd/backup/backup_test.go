@@ -296,18 +296,18 @@ func TestApplyBackupDirectoryConfig_UsesConfigValuesWhenFlagsAreNotChanged(t *te
 	backupDstDir = "/default/dst"
 
 	config := shared.DackupConfig{
-		BackupSrcDir: "/config/src",
-		BackupDstDir: "/config/dst",
+		DataDir:    "/config/src",
+		StagingDir: "/config/dst",
 	}
 
 	applyBackupDirectoryConfig(config, false, false)
 
-	if backupSrcDir != config.BackupSrcDir {
-		t.Fatalf("expected backupSrcDir %q, got %q", config.BackupSrcDir, backupSrcDir)
+	if backupSrcDir != config.DataDir {
+		t.Fatalf("expected backupSrcDir %q, got %q", config.DataDir, backupSrcDir)
 	}
 
-	if backupDstDir != config.BackupDstDir {
-		t.Fatalf("expected backupDstDir %q, got %q", config.BackupDstDir, backupDstDir)
+	if backupDstDir != config.StagingDir {
+		t.Fatalf("expected backupDstDir %q, got %q", config.StagingDir, backupDstDir)
 	}
 }
 
@@ -323,8 +323,8 @@ func TestApplyBackupDirectoryConfig_KeepsFlagValuesWhenFlagsAreChanged(t *testin
 	backupDstDir = "/flag/dst"
 
 	config := shared.DackupConfig{
-		BackupSrcDir: "/config/src",
-		BackupDstDir: "/config/dst",
+		DataDir:    "/config/src",
+		StagingDir: "/config/dst",
 	}
 
 	applyBackupDirectoryConfig(config, true, true)
@@ -350,8 +350,8 @@ func TestApplyBackupDirectoryConfig_IgnoresEmptyConfigValues(t *testing.T) {
 	backupDstDir = "/default/dst"
 
 	config := shared.DackupConfig{
-		BackupSrcDir: "   ",
-		BackupDstDir: "",
+		DataDir:    "   ",
+		StagingDir: "",
 	}
 
 	applyBackupDirectoryConfig(config, false, false)

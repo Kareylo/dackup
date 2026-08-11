@@ -265,7 +265,7 @@ It is deliberately config-agnostic: each concrete backend (rsync-as-backend, Bor
 
 `internal/backend/factory.go`'s `Factory.GetBackend(name, settings)` is the construction entry point — it takes the same `CommandRunner`/`Logger`/`Options` dependencies `TransferService` takes, so a real backend's constructor slots in without changing the factory's signature. As of now `AvailableBackends()` returns nothing (**no concrete implementation** exists yet), so `Factory.GetBackend` only ever resolves to `defaultbackend.Backend`.
 
-`cmd/backend` is a new CRUD-style command package (`create`/`show`/`update`/`remove`) mirroring `cmd/config`'s interactive style, for setting the `Backend`/`BackendSettings` fields on the main config file. Because no concrete backend is registered yet, `create`/`update` currently just report that nothing is implemented rather than writing anything.
+`cmd/backend` is a CRUD-style command package (`create`/`show`/`update`/`remove`) mirroring `cmd/config`'s interactive style, for setting the `Backend`/`BackendSettings` fields on the main config file. `create`/`update` prompt for a backend name from `AvailableBackends()` (currently just `"borg"`) and then that backend's settings; `show` masks any top-level `encrypted_*` field in `BackendSettings` before printing it, so a stored ciphertext (e.g. borg's `encrypted_passphrase`) never appears verbatim.
 
 `cmd/backup` and `cmd/restore` are wired to `internal/backend`. Each has its own `resolveBackend(service commandService, config shared.DackupConfig) (backend.Backend, error)` that builds a `Factory` from the same `CommandRunner`/`Logger`/`Options` the command's `TransferService` already uses, then calls `Factory.GetBackend(config.Backend, config.BackendSettings)`. It's called immediately after `newCommandService()`, before container filtering or preflight, so an unknown/unparseable backend name fails fast — no containers are touched.
 
@@ -276,7 +276,7 @@ The call into the resolved backend's `Backup`/`Restore` happens at the point the
 
 Both calls are unconditional — `cmd/backup`/`cmd/restore` never skip calling `Backup`/`Restore` based on `Options.DryRun`. Per [Dry Run Behavior](#dry-run-behavior), a concrete backend must check `Options.DryRun` itself before performing real work, the same way `TransferService`'s methods self-guard; `defaultbackend.Backend` doesn't need to since it never does anything.
 
-Since `AvailableBackends()` still returns nothing, `Factory.GetBackend` still only ever resolves to `defaultbackend.Backend` in practice — the wiring is live, but there is still no concrete backend implementation to exercise it (Borg is the intended first one).
+`AvailableBackends()` now returns `["borg"]`. `internal/backend/borg` is the first concrete backend: it implements both `Backend` (a single archive in the global repository, for callers that don't know about container groups) and the optional `GroupedBackend` interface — `BackupGroups`/`RestoreGroups`, taking `[]shared.BackendGroup` (deliberately defined in `internal/shared`, not `internal/backend`, so `internal/backend/borg` can reference it without importing `internal/backend`, which would cycle back through `Factory`). `cmd/backup`/`cmd/restore` type-assert the resolved `Backend` for `GroupedBackend` and prefer it when available, passing groups built from `shared.ContainerGroups` (connected components of the `contains` relationship, treated as undirected) via `shared.BackendGroupsFromContainerGroups`. Each group gets its own repository at `filepath.Join(BackendDir, group.Name)`; `BackupGroups` additionally archives everything into `filepath.Join(BackendDir, Config.GlobalRepoName)` (default `"global"`) as a full mirror — `RestoreGroups` never touches that repository, restoring only from each group's own. A borg passphrase is never stored in plaintext: `cmd/backend`'s prompt encrypts it via `shared.SecretStore` (`AESFileSecretStore`, AES-256-GCM keyed by `~/.config/dackup/secret.key`) before it's written to `encrypted_passphrase`, and `borg.Backend` decrypts it at call time to set `BORG_PASSPHRASE` on the `borg` subprocess via `shared.EnvCommandRunner` — a second, optional `CommandRunner` capability (`RunInDirWithEnv`/`OutputWithEnv`) added specifically because plain `CommandRunner` has no way to set environment variables or a working directory, both of which borg's `create`/`extract` need (relative paths + an explicit `cmd.Dir` avoid ambiguity around how borg strips leading slashes from absolute paths).
 
 ## Docker Integration Decision
 
@@ -528,8 +528,9 @@ type DackupConfig struct {
     User string `json:"user,omitempty"`
     Group string `json:"group,omitempty"`
     ConfigFile string `json:"config_file,omitempty"`
-    BackupSrcDir string `json:"backup_src_dir,omitempty"`
-    BackupDstDir string `json:"backup_dst_dir,omitempty"`
+    DataDir string `json:"data_dir,omitempty"`
+    StagingDir string `json:"staging_dir,omitempty"`
+    BackendDir string `json:"backend_dir,omitempty"`
     Containers []ContainerConfig `json:"containers,omitempty"`
 }
 ```
