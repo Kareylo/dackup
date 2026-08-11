@@ -2,8 +2,6 @@ package backup
 
 import (
 	"dackup/internal/shared"
-	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -45,9 +43,9 @@ fix backup ownership, and restart only the containers that were actually stopped
 When no container is specified, all configured containers are backed up.
 
 Examples:
-  sudo dackup backup
-  sudo dackup backup paperless
-  sudo dackup backup paperless adguard`,
+  dackup backup
+  dackup backup paperless
+  dackup backup paperless adguard`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runBackup(
@@ -105,10 +103,6 @@ func newCommandService() commandService {
 }
 
 func runBackup(requestedContainers []string, srcDirFlagChanged bool, dstDirFlagChanged bool) error {
-	if os.Geteuid() != 0 {
-		return fmt.Errorf("this command requires root privileges; run it with sudo")
-	}
-
 	config, effectiveConfigPath, err := shared.EffectiveDackupConfig(backupJSONFile)
 	if err != nil {
 		return err

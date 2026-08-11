@@ -2,8 +2,6 @@ package restore
 
 import (
 	"dackup/internal/shared"
-	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -45,9 +43,9 @@ fix restored ownership, and restart only the containers that were actually stopp
 When no container is specified, all configured containers are restored.
 
 Examples:
-  sudo dackup restore
-  sudo dackup restore paperless
-  sudo dackup restore paperless adguard`,
+  dackup restore
+  dackup restore paperless
+  dackup restore paperless adguard`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRestore(
@@ -105,10 +103,6 @@ func newCommandService() commandService {
 }
 
 func runRestore(requestedContainers []string, srcDirFlagChanged bool, dstDirFlagChanged bool) error {
-	if os.Geteuid() != 0 {
-		return fmt.Errorf("this command requires root privileges; run it with sudo")
-	}
-
 	config, effectiveConfigPath, err := shared.EffectiveDackupConfig(restoreConfigFile)
 	if err != nil {
 		return err
