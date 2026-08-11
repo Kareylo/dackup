@@ -22,7 +22,7 @@ It can stop selected Docker containers, copy configured application directories,
 - Go 1.26.2 or newer
 - Docker CLI
 - rsync
-- Root privileges for backup and restore commands
+- Sufficient privileges to manage the configured Docker containers and to `chown` files to the configured `user`/`group`
 
 ## Installation
 
@@ -173,25 +173,25 @@ Default backup paths:
 Back up all configured containers:
 
 ```bash
-sudo dackup backup
+dackup backup
 ```
 
 Back up one container:
 
 ```bash
-sudo dackup backup paperless
+dackup backup paperless
 ```
 
 Back up multiple containers:
 
 ```bash
-sudo dackup backup paperless adguard
+dackup backup paperless adguard
 ```
 
 Use custom paths:
 
 ```bash
-sudo dackup backup \
+dackup backup \
   --src-dir /opt/apps_docker \
   --dst-dir /backups/in \
   --log-file /var/log/docker-backup.log
@@ -200,7 +200,7 @@ sudo dackup backup \
 Use a custom config file:
 
 ```bash
-sudo dackup backup --config-file /path/to/config.json
+dackup backup --config-file /path/to/config.json
 ```
 
 ## Restore
@@ -214,25 +214,25 @@ Default restore paths:
 Restore all configured containers:
 
 ```bash
-sudo dackup restore
+dackup restore
 ```
 
 Restore one container:
 
 ```bash
-sudo dackup restore paperless
+dackup restore paperless
 ```
 
 Restore multiple containers:
 
 ```bash
-sudo dackup restore paperless adguard
+dackup restore paperless adguard
 ```
 
 Use custom paths:
 
 ```bash
-sudo dackup restore \
+dackup restore \
   --src-dir /backups/in \
   --dst-dir /opt/apps_docker \
   --log-file /var/log/docker-restore.log
@@ -241,7 +241,7 @@ sudo dackup restore \
 Use a custom config file:
 
 ```bash
-sudo dackup restore --config-file /path/to/config.json
+dackup restore --config-file /path/to/config.json
 ```
 
 ## Global flags
@@ -323,7 +323,7 @@ go build -o build/dackup .
 
 ## Safety notes
 
-- Run backup and restore with `sudo`.
+- Run backup and restore as a user with permission to manage the configured Docker containers and to `chown` files to the configured `user`/`group` — often root, but no longer enforced by dackup itself.
 - Make sure Docker container names match the names in your configuration.
 - Use `--dry-run` before running a backup or restore for the first time.
 - Restore uses `rsync -a --delete`, so destination files not present in the backup source can be removed.
