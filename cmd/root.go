@@ -5,6 +5,7 @@ Copyright © 2026 Kareylo <contact@kareylo.fr>
 package cmd
 
 import (
+	"dackup/cmd/backend"
 	"dackup/cmd/backup"
 	"dackup/cmd/config"
 	"dackup/cmd/restore"
@@ -40,6 +41,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&options.Verbose, "verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().BoolVarP(&options.DryRun, "dry-run", "d", false, "preview actions without writing files")
 
+	rootCmd.AddCommand(backend.NewCommand(options))
 	rootCmd.AddCommand(backup.NewCommand(options))
 	rootCmd.AddCommand(config.NewCommand(options))
 	rootCmd.AddCommand(restore.NewCommand(options))
