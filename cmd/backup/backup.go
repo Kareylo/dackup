@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"dackup/internal/backend"
 	"dackup/internal/shared"
 	"path/filepath"
 	"strings"
@@ -112,6 +113,11 @@ func runBackup(requestedContainers []string, srcDirFlagChanged bool, dstDirFlagC
 
 	service := newCommandService()
 
+	backupBackend, err := resolveBackend(service, config)
+	if err != nil {
+		return err
+	}
+
 	configs, err := filterConfigsForBackup(config.Containers, requestedContainers)
 	if err != nil {
 		return err
@@ -156,8 +162,25 @@ func runBackup(requestedContainers []string, srcDirFlagChanged bool, dstDirFlagC
 		return err
 	}
 
+	if err := backupBackend.Backup(backupDstDir); err != nil {
+		return err
+	}
+
 	service.logger.Log("INFO", "Backup command finished successfully")
 	return nil
+}
+
+// resolveBackend constructs the configured Backend (or DefaultBackend if
+// config.Backend is unset) via internal/backend.Factory, using the same
+// dependencies commandService already builds for TransferService.
+func resolveBackend(service commandService, config shared.DackupConfig) (backend.Backend, error) {
+	factory := backend.Factory{
+		Runner:  service.runner,
+		Logger:  service.logger,
+		Options: service.options,
+	}
+
+	return factory.GetBackend(config.Backend, config.BackendSettings)
 }
 
 func applyBackupDirectoryConfig(config shared.DackupConfig, srcDirFlagChanged bool, dstDirFlagChanged bool) {

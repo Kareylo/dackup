@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"dackup/internal/backend"
 	"dackup/internal/shared"
 	"path/filepath"
 	"reflect"
@@ -262,6 +263,24 @@ func TestSelectContainerAndContainedForBackup_HandlesCycles(t *testing.T) {
 
 	if !selected["b"] {
 		t.Fatal("expected container b to be selected")
+	}
+}
+
+func TestResolveBackend_EmptyNameReturnsDefaultBackend(t *testing.T) {
+	got, err := resolveBackend(commandService{}, shared.DackupConfig{})
+	if err != nil {
+		t.Fatalf("resolveBackend returned error: %v", err)
+	}
+
+	if got.Name() != backend.DefaultBackendName {
+		t.Fatalf("expected backend name %q, got %q", backend.DefaultBackendName, got.Name())
+	}
+}
+
+func TestResolveBackend_UnknownNameReturnsError(t *testing.T) {
+	_, err := resolveBackend(commandService{}, shared.DackupConfig{Backend: "borg"})
+	if err == nil {
+		t.Fatal("expected error for unknown backend name, got nil")
 	}
 }
 

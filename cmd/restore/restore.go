@@ -1,6 +1,7 @@
 package restore
 
 import (
+	"dackup/internal/backend"
 	"dackup/internal/shared"
 	"path/filepath"
 	"strings"
@@ -112,12 +113,21 @@ func runRestore(requestedContainers []string, srcDirFlagChanged bool, dstDirFlag
 
 	service := newCommandService()
 
+	restoreBackend, err := resolveBackend(service, config)
+	if err != nil {
+		return err
+	}
+
 	configs, err := filterConfigsForRestore(config.Containers, requestedContainers)
 	if err != nil {
 		return err
 	}
 
 	if err := restorePreflightChecks(effectiveConfigPath, config, configs); err != nil {
+		return err
+	}
+
+	if err := restoreBackend.Restore(restoreSrcDir); err != nil {
 		return err
 	}
 
@@ -151,6 +161,19 @@ func runRestore(requestedContainers []string, srcDirFlagChanged bool, dstDirFlag
 
 	service.logger.Log("INFO", "Restore command finished successfully")
 	return nil
+}
+
+// resolveBackend constructs the configured Backend (or DefaultBackend if
+// config.Backend is unset) via internal/backend.Factory, using the same
+// dependencies commandService already builds for TransferService.
+func resolveBackend(service commandService, config shared.DackupConfig) (backend.Backend, error) {
+	factory := backend.Factory{
+		Runner:  service.runner,
+		Logger:  service.logger,
+		Options: service.options,
+	}
+
+	return factory.GetBackend(config.Backend, config.BackendSettings)
 }
 
 func applyRestoreDirectoryConfig(config shared.DackupConfig, srcDirFlagChanged bool, dstDirFlagChanged bool) {

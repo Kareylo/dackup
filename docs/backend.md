@@ -7,11 +7,11 @@ Implemented (this document reflects the actual code, not just the original ask):
 - `../internal/backend` — the `Backend` interface, `DefaultBackend`, `Factory`, `AvailableBackends()`, `ParseSettings`.
 - `internal/shared.DackupConfig` — optional `Backend`/`BackendSettings` fields.
 - `dackup backend` — the `create`/`show`/`update`/`remove` CRUD command.
+- `dackup backup`/`dackup restore` — wired to `Factory.GetBackend` and call `Backend.Backup()`/`Backend.Restore()` (see "Wiring into backup/restore" below for the exact call sites).
 
 Not implemented yet:
 
-- No concrete backend (Borg, Kopia, rsync-as-backend, ...). `AvailableBackends()` returns an empty list, so `dackup backend create`/`update` currently just report that nothing is implemented rather than writing anything.
-- No wiring into `dackup backup`/`dackup restore`. `shared.TransferService.Run` (the rsync staging copy) is still the entire operation those commands perform; nothing calls `Factory.GetBackend` outside of `../cmd/backend` and tests.
+- No concrete backend (Borg, Kopia, rsync-as-backend, ...). `AvailableBackends()` returns an empty list, so `dackup backend create`/`update` currently just report that nothing is implemented rather than writing anything, and every `Backup()`/`Restore()` call in `backup`/`restore` resolves to `DefaultBackend` (a no-op) in practice.
 
 ## One interface, not one per direction
 
@@ -51,7 +51,7 @@ Two separate dispatch points, both switching on the backend name, exist so that 
 - `../internal/backend/settings.go` — `ParseSettings(name string, raw json.RawMessage) (any, error)` decodes `backend_settings` into the matching backend's own typed `Config` struct (e.g. a future `borg.Config`). For `""` it returns `nil, nil`; any other name today is `"unknown backend"`.
 - `../internal/backend/factory.go` — `Factory.GetBackend(name string, settings json.RawMessage) (Backend, error)` is the actual construction entry point: given a name and its raw settings, it returns a ready-to-use `Backend`. It carries the same dependencies `shared.TransferService` takes (`CommandRunner`, `Logger`, `Options`) so a real backend's constructor slots in without changing the factory's signature. `""` resolves to `DefaultBackend{Logger: factory.Logger}`; any other name today is an error, since nothing is registered.
 
-Note that `dackup backend create`/`update` do **not** call `ParseSettings` or `Factory.GetBackend` — those two only matter once something actually needs a live `Backend` to call `Backup()`/`Restore()` on (i.e. once `../cmd/backup`/`../cmd/restore` are wired up). The CRUD command's own settings-prompt switch (in `../cmd/backend`, not `../internal/backend`) is what gathers `backend_settings` interactively before writing the config — kept out of `../internal/backend` the same way all container prompting lives in `../cmd/config`, not `../internal/shared`.
+Note that `dackup backend create`/`update` do **not** call `ParseSettings` or `Factory.GetBackend` — those two only matter once something actually needs a live `Backend` to call `Backup()`/`Restore()` on, which is `../cmd/backup`/`../cmd/restore`'s job (see "Wiring into backup/restore" below). The CRUD command's own settings-prompt switch (in `../cmd/backend`, not `../internal/backend`) is what gathers `backend_settings` interactively before writing the config — kept out of `../internal/backend` the same way all container prompting lives in `../cmd/config`, not `../internal/shared`.
 
 ```mermaid
 ---
@@ -147,11 +147,15 @@ internal/backend/borg/
 └── borg_test.go
 ```
 
-## Wiring into backup/restore (future work)
+## Wiring into backup/restore (as built)
 
-Once a concrete backend exists, `../cmd/backup` and `../cmd/restore` build a `Factory` (same way they build a `TransferService` today), resolve the configured `Backend` via `Factory.GetBackend(config.Backend, config.BackendSettings)`, and call into it after staging:
+`../cmd/backup` and `../cmd/restore` each have a `resolveBackend(service commandService, config shared.DackupConfig) (backend.Backend, error)` that builds a `Factory` from the same `CommandRunner`/`Logger`/`Options` the command's `TransferService` already uses, then calls `Factory.GetBackend(config.Backend, config.BackendSettings)`. It runs immediately after building the command service, before container filtering or preflight — an unknown/unparseable backend name fails fast, before anything is touched.
 
-- `backup`: stop containers → stage (`TransferService`) → start containers → `backend.Backup(stagingDir)`.
-- `restore`: `backend.Restore(stagingDir)` → stop containers → stage → fix ownership → start containers.
+The actual `Backup()`/`Restore()` call sits at a specific point in each flow, not next to `resolveBackend`:
 
-Neither of these calls exists in `../cmd/backup`/`../cmd/restore` yet — `TransferService.Run` remains the entire operation those commands perform.
+- `backup`: stop containers → stage (`TransferService`) → fix ownership → start containers → `backend.Backup(backupDstDir)`. The backend call is last, so an arbitrarily slow backup never extends container downtime, and `backupDstDir` (where `TransferService` just staged everything) is the `stagingDir` it operates on.
+- `restore`: filter containers → preflight → `backend.Restore(restoreSrcDir)` → stop containers → stage → fix ownership → start containers. The backend call happens *before* anything container-related, populating the staging directory (`restoreSrcDir`) from backend storage first, so the downtime-critical stop/stage/start sequence only begins once that data already exists on disk.
+
+Both calls are unconditional with respect to `--dry-run` — the concrete backend is expected to check `Options.DryRun` itself and log a preview instead of doing real work, the same convention `TransferService`'s methods already follow. `DefaultBackend` satisfies this trivially (it never does real work).
+
+Since `AvailableBackends()` still returns nothing, every real run today resolves to `DefaultBackend` — the wiring is live, but there's still no concrete backend to actually exercise it.
