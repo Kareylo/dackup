@@ -9,6 +9,7 @@ import (
 	"dackup/cmd/backup"
 	"dackup/cmd/config"
 	"dackup/cmd/restore"
+	"dackup/cmd/version"
 	"dackup/internal/shared"
 	"os"
 
@@ -19,8 +20,9 @@ var options = &shared.Options{}
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "dackup",
-	Short: "Small application to backup your docker containers data through rsync",
+	Use:     "dackup",
+	Short:   "Small application to backup your docker containers data through rsync",
+	Version: version.Version,
 	Long: `Small CLI application to backup your docker containers data through rsync.
 You need docker and rsync installed on your system.`,
 	// Uncomment the following line if your bare application
@@ -45,4 +47,5 @@ func init() {
 	rootCmd.AddCommand(backup.NewCommand(options))
 	rootCmd.AddCommand(config.NewCommand(options))
 	rootCmd.AddCommand(restore.NewCommand(options))
+	rootCmd.AddCommand(version.NewCommand(options))
 }
