@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"dackup/cmd/backend"
 	"dackup/cmd/backup"
 	"dackup/cmd/config"
 	"dackup/cmd/restore"
@@ -10,6 +11,7 @@ import (
 
 func TestRootCommandHasExpectedSubcommands(t *testing.T) {
 	expectedCommands := []string{
+		"backend",
 		"backup",
 		"restore",
 		"config",
@@ -58,6 +60,34 @@ func TestConfigCommandHasExpectedSubcommands(t *testing.T) {
 
 			if cmd.Name() != expectedCommand {
 				t.Fatalf("expected config command %q, got %q", expectedCommand, cmd.Name())
+			}
+		})
+	}
+}
+
+func TestBackendCommandHasExpectedSubcommands(t *testing.T) {
+	backendCmd := backend.NewCommand(&shared.Options{})
+
+	expectedCommands := []string{
+		"create",
+		"show",
+		"update",
+		"remove",
+	}
+
+	for _, expectedCommand := range expectedCommands {
+		t.Run(expectedCommand, func(t *testing.T) {
+			cmd, _, err := backendCmd.Find([]string{expectedCommand})
+			if err != nil {
+				t.Fatalf("backendCmd.Find returned error: %v", err)
+			}
+
+			if cmd == nil {
+				t.Fatalf("expected backend command %q to exist", expectedCommand)
+			}
+
+			if cmd.Name() != expectedCommand {
+				t.Fatalf("expected backend command %q, got %q", expectedCommand, cmd.Name())
 			}
 		})
 	}

@@ -13,6 +13,26 @@ type CommandRunner interface {
 	LookPath(file string) (string, error)
 }
 
+// EnvCommandRunner is an optional capability a CommandRunner can also
+// implement to run a command with a specific working directory and/or
+// extra environment variables set — needed by backends like borg that
+// require both (BORG_PASSPHRASE for authentication, and a repo-relative
+// cwd so archived paths stay relative rather than absolute). Not every
+// caller needs this, so it's kept separate from the core CommandRunner
+// interface; callers that need it type-assert for it.
+type EnvCommandRunner interface {
+	// RunInDirWithEnv runs name with args. dir overrides the process's
+	// working directory unless empty; env is appended to the current
+	// environment.
+	RunInDirWithEnv(dir string, env []string, name string, args ...string) error
+
+	// OutputWithEnv runs name with args, with env appended to the current
+	// environment, and returns its standard output.
+	OutputWithEnv(env []string, name string, args ...string) ([]byte, error)
+}
+
+// OSCommandRunner is the real CommandRunner (and EnvCommandRunner)
+// implementation, running commands via os/exec.
 type OSCommandRunner struct{}
 
 func (OSCommandRunner) Run(name string, args ...string) error {
@@ -27,6 +47,26 @@ func (OSCommandRunner) LookPath(file string) (string, error) {
 	return exec.LookPath(file)
 }
 
+func (OSCommandRunner) RunInDirWithEnv(dir string, env []string, name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	cmd.Env = append(os.Environ(), env...)
+
+	return cmd.Run()
+}
+
+func (OSCommandRunner) OutputWithEnv(env []string, name string, args ...string) ([]byte, error) {
+	cmd := exec.Command(name, args...)
+	cmd.Env = append(os.Environ(), env...)
+
+	return cmd.Output()
+}
+
+// LoggedCommandRunner wraps a CommandRunner, redirecting each command's
+// stdout/stderr to LogFile (and echoing the command line when
+// Options.Verbose is set) instead of the calling process's own streams.
 type LoggedCommandRunner struct {
 	Runner  CommandRunner
 	FS      FileSystem
@@ -78,4 +118,45 @@ func (runner LoggedCommandRunner) LookPath(file string) (string, error) {
 	}
 
 	return commandRunner.LookPath(file)
+}
+
+func (runner LoggedCommandRunner) RunInDirWithEnv(dir string, env []string, name string, args ...string) error {
+	fs := runner.FS
+	if fs == nil {
+		fs = OSFileSystem{}
+	}
+
+	logFile, err := fs.OpenFile(runner.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return fmt.Errorf("failed to open log file: %w", err)
+	}
+	defer logFile.Close()
+
+	if runner.Options != nil && runner.Options.Verbose {
+		fmt.Printf("Running: %s %s\n", name, strings.Join(args, " "))
+	}
+
+	cmd := exec.Command(name, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	cmd.Env = append(os.Environ(), env...)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+
+	return cmd.Run()
+}
+
+func (runner LoggedCommandRunner) OutputWithEnv(env []string, name string, args ...string) ([]byte, error) {
+	commandRunner := runner.Runner
+	if commandRunner == nil {
+		commandRunner = OSCommandRunner{}
+	}
+
+	envRunner, ok := commandRunner.(EnvCommandRunner)
+	if !ok {
+		return nil, fmt.Errorf("command runner does not support environment variables")
+	}
+
+	return envRunner.OutputWithEnv(env, name, args...)
 }

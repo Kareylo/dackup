@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	defaultBackupSrcDir = "/opt/apps_docker"
-	defaultBackupDstDir = "/backups/in"
+	defaultDataDir    = "/opt/apps_docker"
+	defaultStagingDir = "/backups/in"
 )
 
 var (
@@ -150,12 +150,12 @@ func runConfigInit() error {
 		return err
 	}
 
-	backupSourceDir, err := service.prompt.StringWithDefault("Backup source root directory", defaultBackupSrcDir)
+	dataDir, err := service.prompt.StringWithDefault("Application data directory", defaultDataDir)
 	if err != nil {
 		return err
 	}
 
-	backupDestinationDir, err := service.prompt.StringWithDefault("Backup destination root directory", defaultBackupDstDir)
+	stagingDir, err := service.prompt.StringWithDefault("Staging directory", defaultStagingDir)
 	if err != nil {
 		return err
 	}
@@ -166,7 +166,7 @@ func runConfigInit() error {
 	}
 
 	if useCustomFile {
-		return service.createConfigWithCustomContainersFile(owner, group, backupSourceDir, backupDestinationDir)
+		return service.createConfigWithCustomContainersFile(owner, group, dataDir, stagingDir)
 	}
 
 	containers, err := service.askContainers()
@@ -175,11 +175,11 @@ func runConfigInit() error {
 	}
 
 	config := shared.DackupConfig{
-		User:         owner,
-		Group:        group,
-		BackupSrcDir: backupSourceDir,
-		BackupDstDir: backupDestinationDir,
-		Containers:   containers,
+		User:       owner,
+		Group:      group,
+		DataDir:    dataDir,
+		StagingDir: stagingDir,
+		Containers: containers,
 	}
 
 	if err := shared.WriteDackupConfig(configFilePath, config, options); err != nil {
@@ -193,8 +193,8 @@ func runConfigInit() error {
 func (service commandService) createConfigWithCustomContainersFile(
 	owner string,
 	group string,
-	backupSourceDir string,
-	backupDestinationDir string,
+	dataDir string,
+	stagingDir string,
 ) error {
 	customPath, err := service.prompt.RequiredString("Custom containers config file path")
 	if err != nil {
@@ -207,11 +207,11 @@ func (service commandService) createConfigWithCustomContainersFile(
 	}
 
 	mainConfig := shared.DackupConfig{
-		User:         owner,
-		Group:        group,
-		ConfigFile:   customPath,
-		BackupSrcDir: backupSourceDir,
-		BackupDstDir: backupDestinationDir,
+		User:       owner,
+		Group:      group,
+		ConfigFile: customPath,
+		DataDir:    dataDir,
+		StagingDir: stagingDir,
 	}
 
 	if err := shared.WriteDackupConfig(configFilePath, mainConfig, options); err != nil {
@@ -468,15 +468,15 @@ func runConfigUseFile(customPath string) error {
 		}
 	}
 
-	if strings.TrimSpace(mainConfig.BackupSrcDir) == "" {
-		mainConfig.BackupSrcDir, err = service.prompt.StringWithDefault("Backup source root directory", defaultBackupSrcDir)
+	if strings.TrimSpace(mainConfig.DataDir) == "" {
+		mainConfig.DataDir, err = service.prompt.StringWithDefault("Application data directory", defaultDataDir)
 		if err != nil {
 			return err
 		}
 	}
 
-	if strings.TrimSpace(mainConfig.BackupDstDir) == "" {
-		mainConfig.BackupDstDir, err = service.prompt.StringWithDefault("Backup destination root directory", defaultBackupDstDir)
+	if strings.TrimSpace(mainConfig.StagingDir) == "" {
+		mainConfig.StagingDir, err = service.prompt.StringWithDefault("Staging directory", defaultStagingDir)
 		if err != nil {
 			return err
 		}

@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"dackup/internal/backend"
 	"dackup/internal/shared"
 	"path/filepath"
 	"reflect"
@@ -265,6 +266,24 @@ func TestSelectContainerAndContainedForBackup_HandlesCycles(t *testing.T) {
 	}
 }
 
+func TestResolveBackend_EmptyNameReturnsDefaultBackend(t *testing.T) {
+	got, err := resolveBackend(commandService{}, shared.DackupConfig{})
+	if err != nil {
+		t.Fatalf("resolveBackend returned error: %v", err)
+	}
+
+	if got.Name() != backend.DefaultBackendName {
+		t.Fatalf("expected backend name %q, got %q", backend.DefaultBackendName, got.Name())
+	}
+}
+
+func TestResolveBackend_UnknownNameReturnsError(t *testing.T) {
+	_, err := resolveBackend(commandService{}, shared.DackupConfig{Backend: "borg"})
+	if err == nil {
+		t.Fatal("expected error for unknown backend name, got nil")
+	}
+}
+
 func TestApplyBackupDirectoryConfig_UsesConfigValuesWhenFlagsAreNotChanged(t *testing.T) {
 	originalSrcDir := backupSrcDir
 	originalDstDir := backupDstDir
@@ -277,18 +296,18 @@ func TestApplyBackupDirectoryConfig_UsesConfigValuesWhenFlagsAreNotChanged(t *te
 	backupDstDir = "/default/dst"
 
 	config := shared.DackupConfig{
-		BackupSrcDir: "/config/src",
-		BackupDstDir: "/config/dst",
+		DataDir:    "/config/src",
+		StagingDir: "/config/dst",
 	}
 
 	applyBackupDirectoryConfig(config, false, false)
 
-	if backupSrcDir != config.BackupSrcDir {
-		t.Fatalf("expected backupSrcDir %q, got %q", config.BackupSrcDir, backupSrcDir)
+	if backupSrcDir != config.DataDir {
+		t.Fatalf("expected backupSrcDir %q, got %q", config.DataDir, backupSrcDir)
 	}
 
-	if backupDstDir != config.BackupDstDir {
-		t.Fatalf("expected backupDstDir %q, got %q", config.BackupDstDir, backupDstDir)
+	if backupDstDir != config.StagingDir {
+		t.Fatalf("expected backupDstDir %q, got %q", config.StagingDir, backupDstDir)
 	}
 }
 
@@ -304,8 +323,8 @@ func TestApplyBackupDirectoryConfig_KeepsFlagValuesWhenFlagsAreChanged(t *testin
 	backupDstDir = "/flag/dst"
 
 	config := shared.DackupConfig{
-		BackupSrcDir: "/config/src",
-		BackupDstDir: "/config/dst",
+		DataDir:    "/config/src",
+		StagingDir: "/config/dst",
 	}
 
 	applyBackupDirectoryConfig(config, true, true)
@@ -331,8 +350,8 @@ func TestApplyBackupDirectoryConfig_IgnoresEmptyConfigValues(t *testing.T) {
 	backupDstDir = "/default/dst"
 
 	config := shared.DackupConfig{
-		BackupSrcDir: "   ",
-		BackupDstDir: "",
+		DataDir:    "   ",
+		StagingDir: "",
 	}
 
 	applyBackupDirectoryConfig(config, false, false)

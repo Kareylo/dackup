@@ -1,6 +1,7 @@
 package restore
 
 import (
+	"dackup/internal/backend"
 	"dackup/internal/shared"
 	"path/filepath"
 	"strings"
@@ -112,12 +113,26 @@ func runRestore(requestedContainers []string, srcDirFlagChanged bool, dstDirFlag
 
 	service := newCommandService()
 
+	restoreBackend, err := resolveBackend(service, config)
+	if err != nil {
+		return err
+	}
+
 	configs, err := filterConfigsForRestore(config.Containers, requestedContainers)
 	if err != nil {
 		return err
 	}
 
 	if err := restorePreflightChecks(effectiveConfigPath, config, configs); err != nil {
+		return err
+	}
+
+	if groupedBackend, ok := restoreBackend.(backend.GroupedBackend); ok {
+		groups := shared.BackendGroupsFromContainerGroups(shared.ContainerGroups(configs))
+		if err := groupedBackend.RestoreGroups(restoreSrcDir, groups); err != nil {
+			return err
+		}
+	} else if err := restoreBackend.Restore(restoreSrcDir); err != nil {
 		return err
 	}
 
@@ -153,13 +168,28 @@ func runRestore(requestedContainers []string, srcDirFlagChanged bool, dstDirFlag
 	return nil
 }
 
-func applyRestoreDirectoryConfig(config shared.DackupConfig, srcDirFlagChanged bool, dstDirFlagChanged bool) {
-	if !srcDirFlagChanged && strings.TrimSpace(config.BackupDstDir) != "" {
-		restoreSrcDir = config.BackupDstDir
+// resolveBackend constructs the configured Backend (or the default no-op backend if
+// config.Backend is unset) via internal/backend.Factory, using the same
+// dependencies commandService already builds for TransferService.
+func resolveBackend(service commandService, config shared.DackupConfig) (backend.Backend, error) {
+	factory := backend.Factory{
+		Runner:     service.runner,
+		Logger:     service.logger,
+		Options:    service.options,
+		BackendDir: config.BackendDir,
+		Secrets:    shared.AESFileSecretStore{},
 	}
 
-	if !dstDirFlagChanged && strings.TrimSpace(config.BackupSrcDir) != "" {
-		restoreDstDir = config.BackupSrcDir
+	return factory.GetBackend(config.Backend, config.BackendSettings)
+}
+
+func applyRestoreDirectoryConfig(config shared.DackupConfig, srcDirFlagChanged bool, dstDirFlagChanged bool) {
+	if !srcDirFlagChanged && strings.TrimSpace(config.StagingDir) != "" {
+		restoreSrcDir = config.StagingDir
+	}
+
+	if !dstDirFlagChanged && strings.TrimSpace(config.DataDir) != "" {
+		restoreDstDir = config.DataDir
 	}
 }
 

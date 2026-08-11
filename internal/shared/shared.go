@@ -22,12 +22,15 @@ type ContainerConfig struct {
 }
 
 type DackupConfig struct {
-	User         string            `json:"user,omitempty"`
-	Group        string            `json:"group,omitempty"`
-	ConfigFile   string            `json:"config_file,omitempty"`
-	BackupSrcDir string            `json:"backup_src_dir,omitempty"`
-	BackupDstDir string            `json:"backup_dst_dir,omitempty"`
-	Containers   []ContainerConfig `json:"containers,omitempty"`
+	User            string            `json:"user,omitempty"`
+	Group           string            `json:"group,omitempty"`
+	ConfigFile      string            `json:"config_file,omitempty"`
+	DataDir         string            `json:"data_dir,omitempty"`
+	StagingDir      string            `json:"staging_dir,omitempty"`
+	BackendDir      string            `json:"backend_dir,omitempty"`
+	Backend         string            `json:"backend,omitempty"`
+	BackendSettings json.RawMessage   `json:"backend_settings,omitempty"`
+	Containers      []ContainerConfig `json:"containers,omitempty"`
 }
 
 func DefaultDackupConfigPath() (string, error) {
