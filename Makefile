@@ -6,7 +6,8 @@ INSTALL_BIN := $(INSTALL_DIR)/$(APP_NAME)
 
 GO ?= go
 GOFLAGS ?=
-LDFLAGS ?= -s -w
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS ?= -s -w -X dackup/cmd/version.Version=$(VERSION)
 
 .PHONY: help
 help:

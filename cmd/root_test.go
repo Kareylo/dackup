@@ -5,6 +5,7 @@ import (
 	"dackup/cmd/backup"
 	"dackup/cmd/config"
 	"dackup/cmd/restore"
+	"dackup/cmd/version"
 	"dackup/internal/shared"
 	"testing"
 )
@@ -15,6 +16,7 @@ func TestRootCommandHasExpectedSubcommands(t *testing.T) {
 		"backup",
 		"restore",
 		"config",
+		"version",
 	}
 
 	for _, expectedCommand := range expectedCommands {
@@ -32,6 +34,26 @@ func TestRootCommandHasExpectedSubcommands(t *testing.T) {
 				t.Fatalf("expected command %q, got %q", expectedCommand, cmd.Name())
 			}
 		})
+	}
+}
+
+func TestRootCommandVersionFlagUsesVersionPackage(t *testing.T) {
+	originalVersion := version.Version
+	version.Version = "9.9.9"
+	defer func() { version.Version = originalVersion }()
+
+	rootCmd.Version = version.Version
+
+	if rootCmd.Flags().Lookup("version") == nil {
+		rootCmd.InitDefaultVersionFlag()
+	}
+
+	if rootCmd.Version != "9.9.9" {
+		t.Fatalf("expected rootCmd.Version to be %q, got %q", "9.9.9", rootCmd.Version)
+	}
+
+	if rootCmd.Flags().Lookup("version") == nil {
+		t.Fatal("expected --version flag to be registered")
 	}
 }
 
