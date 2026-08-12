@@ -26,6 +26,8 @@ type commandService struct {
 	prompt  shared.PromptService
 }
 
+// NewCommand builds the "config" command and its init/add/update/remove/
+// list/use-file subcommands.
 func NewCommand(sharedOptions *shared.Options) *cobra.Command {
 	options = sharedOptions
 

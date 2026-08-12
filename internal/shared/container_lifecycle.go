@@ -2,6 +2,8 @@ package shared
 
 import "fmt"
 
+// ContainerLifecycleService stops and restarts Docker containers around a
+// backup or restore, restarting only the ones it actually stopped.
 type ContainerLifecycleService struct {
 	Docker  DockerService
 	Runner  CommandRunner
@@ -9,6 +11,10 @@ type ContainerLifecycleService struct {
 	Options *Options
 }
 
+// StopRunningContainers stops each running container in containers and
+// returns the ones it actually stopped, so StartStoppedContainers later
+// restarts only those. action names the operation for log messages (e.g.
+// "backup").
 func (service ContainerLifecycleService) StopRunningContainers(containers []string, action string) ([]string, error) {
 	service.Logger.Log("INFO", fmt.Sprintf("Stopping containers before %s ...", action))
 
@@ -51,6 +57,10 @@ func (service ContainerLifecycleService) StopRunningContainers(containers []stri
 	return stoppedContainers, nil
 }
 
+// StartStoppedContainers restarts each container in stoppedContainers
+// (typically StopRunningContainers's own return value). action names the
+// operation that stopped them, for log messages when nothing needs
+// restarting.
 func (service ContainerLifecycleService) StartStoppedContainers(stoppedContainers []string, action string) error {
 	service.Logger.Log("INFO", "Starting previously stopped containers ...")
 

@@ -5,6 +5,12 @@ import (
 	"strings"
 )
 
+// PreflightChecks validates that action (backup or restore) can proceed:
+// the effective config file exists, config.User/Group are set, the source/
+// destination/backend roots exist as directories, docker and rsync are on
+// PATH, and every configured path in configs resolves (via resolver) to an
+// existing source directory. fs/runner default to their real
+// implementations when nil.
 func PreflightChecks(
 	action string,
 	effectiveConfigPath string,

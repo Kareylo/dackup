@@ -26,6 +26,7 @@ type commandService struct {
 	transfer shared.TransferService
 }
 
+// NewCommand builds the "restore" command.
 func NewCommand(sharedOptions *shared.Options) *cobra.Command {
 	options = sharedOptions
 

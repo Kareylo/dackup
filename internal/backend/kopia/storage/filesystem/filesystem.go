@@ -32,6 +32,7 @@ func (fs Storage) Validate() error {
 	return nil
 }
 
+// BuildInvocation implements storage.Provider.
 func (fs Storage) BuildInvocation(repoName string, secrets shared.SecretStore) (storage.Invocation, error) {
 	return storage.Invocation{
 		Kind: Name,

@@ -7,10 +7,13 @@ import (
 	"time"
 )
 
+// Logger records a leveled message.
 type Logger interface {
 	Log(level string, message string)
 }
 
+// FileLogger is a Logger that prints each message to stdout and appends a
+// timestamped line to LogFile.
 type FileLogger struct {
 	LogFile string
 	FS      FileSystem

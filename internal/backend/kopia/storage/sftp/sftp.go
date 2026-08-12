@@ -76,6 +76,7 @@ func (s Storage) port() int {
 	return DefaultPort
 }
 
+// BuildInvocation implements storage.Provider.
 func (s Storage) BuildInvocation(repoName string, secrets shared.SecretStore) (storage.Invocation, error) {
 	args := []string{
 		"--host=" + s.Host,

@@ -44,6 +44,7 @@ func (s Storage) Validate() error {
 	return nil
 }
 
+// BuildInvocation implements storage.Provider.
 func (s Storage) BuildInvocation(repoName string, secrets shared.SecretStore) (storage.Invocation, error) {
 	applicationKey, err := secrets.Decrypt(s.EncryptedApplicationKey)
 	if err != nil {

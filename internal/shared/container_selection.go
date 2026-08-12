@@ -5,6 +5,9 @@ import (
 	"strings"
 )
 
+// SelectContainerAndContained marks containerName selected in selected,
+// then recursively does the same for every container it Contains. Already
+// visited containers are skipped, so a cycle in Contains terminates safely.
 func SelectContainerAndContained(
 	containerName string,
 	configByContainer map[string]ContainerConfig,
@@ -27,6 +30,12 @@ func SelectContainerAndContained(
 	}
 }
 
+// FilterContainerConfigs narrows configs down to requestedContainers plus
+// each one's Contains dependents (recursively, via
+// SelectContainerAndContained), preserving configs's original order. An
+// empty requestedContainers returns configs unchanged (meaning "all
+// containers"); requesting an unconfigured container is an error. action
+// names the operation for the "no containers selected" error message.
 func FilterContainerConfigs(
 	configs []ContainerConfig,
 	requestedContainers []string,
@@ -70,6 +79,9 @@ func FilterContainerConfigs(
 	return filteredConfigs, nil
 }
 
+// ContainersToStopFromConfig lists, in encounter order and without
+// duplicates, every container that should be stopped: each config with
+// ToStop true, plus everything it Contains.
 func ContainersToStopFromConfig(configs []ContainerConfig) []string {
 	seen := make(map[string]bool)
 	var containers []string
@@ -89,6 +101,8 @@ func ContainersToStopFromConfig(configs []ContainerConfig) []string {
 	return containers
 }
 
+// AddUniqueContainer appends container to *containers, unless it's empty
+// or already present in seen (which is updated in place).
 func AddUniqueContainer(container string, seen map[string]bool, containers *[]string) {
 	container = strings.TrimSpace(container)
 	if container == "" || seen[container] {

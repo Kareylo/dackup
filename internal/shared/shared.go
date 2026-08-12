@@ -7,13 +7,19 @@ import (
 	"path/filepath"
 )
 
+// DefaultConfigRelativePath is DefaultDackupConfigPath's path, relative to
+// the user's home directory.
 const DefaultConfigRelativePath = ".config/dackup/config.json"
 
+// Options carries the global --verbose/--dry-run flags into every service.
 type Options struct {
 	Verbose bool
 	DryRun  bool
 }
 
+// ContainerConfig is one configured Docker container: whether to stop it,
+// which paths to back up/restore, and which other containers it Contains
+// (selected automatically alongside it).
 type ContainerConfig struct {
 	Container string   `json:"container"`
 	ToStop    bool     `json:"to_stop"`
@@ -21,6 +27,11 @@ type ContainerConfig struct {
 	Contains  []string `json:"contains,omitempty"`
 }
 
+// DackupConfig is the main dackup configuration file's contents: user/group
+// for ownership fixes, the source/staging/backend directory roots, the
+// configured backup backend (if any), and either an inline Containers list
+// or a ConfigFile pointer to a separate file holding it — see
+// EffectiveDackupConfig.
 type DackupConfig struct {
 	User            string            `json:"user,omitempty"`
 	Group           string            `json:"group,omitempty"`
@@ -33,6 +44,7 @@ type DackupConfig struct {
 	Containers      []ContainerConfig `json:"containers,omitempty"`
 }
 
+// DefaultDackupConfigPath returns ~/.config/dackup/config.json.
 func DefaultDackupConfigPath() (string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -42,6 +54,7 @@ func DefaultDackupConfigPath() (string, error) {
 	return filepath.Join(homeDir, DefaultConfigRelativePath), nil
 }
 
+// ReadDackupConfig reads and parses the DackupConfig JSON file at path.
 func ReadDackupConfig(path string) (DackupConfig, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -57,6 +70,9 @@ func ReadDackupConfig(path string) (DackupConfig, error) {
 	return config, nil
 }
 
+// WriteDackupConfig writes config as indented JSON to path, creating its
+// parent directory if needed. With options.DryRun set, it prints what
+// would be written instead of touching disk.
 func WriteDackupConfig(path string, config DackupConfig, options *Options) error {
 	if options != nil && options.DryRun {
 		content, err := json.MarshalIndent(config, "", "  ")
@@ -87,6 +103,11 @@ func WriteDackupConfig(path string, config DackupConfig, options *Options) error
 	return nil
 }
 
+// EffectiveDackupConfig reads the main config at mainConfigPath and, if it
+// points at a separate ConfigFile, overlays that file's Containers onto it
+// — so callers always see the right Containers regardless of which file
+// they live in. It returns the effective config and the path Containers
+// actually came from.
 func EffectiveDackupConfig(mainConfigPath string) (DackupConfig, string, error) {
 	mainConfig, err := ReadDackupConfig(mainConfigPath)
 	if err != nil {
@@ -110,6 +131,10 @@ func EffectiveDackupConfig(mainConfigPath string) (DackupConfig, string, error) 
 	return effectiveConfig, effectiveConfigPath, nil
 }
 
+// EffectiveContainersConfigPath returns the path that actually holds
+// Containers: mainConfigPath's own ConfigFile if set, otherwise
+// mainConfigPath itself. Returns mainConfigPath unchanged if it doesn't
+// exist yet (e.g. before "dackup config init").
 func EffectiveContainersConfigPath(mainConfigPath string) (string, error) {
 	if !FileExists(mainConfigPath) {
 		return mainConfigPath, nil
@@ -127,6 +152,8 @@ func EffectiveContainersConfigPath(mainConfigPath string) (string, error) {
 	return mainConfigPath, nil
 }
 
+// ReadContainerConfigsFromPath reads the Containers list from the
+// DackupConfig JSON file at path.
 func ReadContainerConfigsFromPath(path string) ([]ContainerConfig, error) {
 	config, err := ReadDackupConfig(path)
 	if err != nil {
@@ -136,6 +163,9 @@ func ReadContainerConfigsFromPath(path string) ([]ContainerConfig, error) {
 	return config.Containers, nil
 }
 
+// WriteContainerConfigsToPath writes containers into the DackupConfig JSON
+// file at path, preserving that file's other existing fields (reading it
+// first if it already exists).
 func WriteContainerConfigsToPath(path string, containers []ContainerConfig, options *Options) error {
 	existingConfig := DackupConfig{}
 
@@ -153,6 +183,7 @@ func WriteContainerConfigsToPath(path string, containers []ContainerConfig, opti
 	return WriteDackupConfig(path, existingConfig, options)
 }
 
+// FileExists reports whether path exists on disk.
 func FileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil

@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+// CommandRunner abstracts running an external command, so callers are
+// testable without invoking a real subprocess.
 type CommandRunner interface {
 	Run(name string, args ...string) error
 	Output(name string, args ...string) ([]byte, error)

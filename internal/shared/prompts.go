@@ -6,16 +6,20 @@ import (
 	"strings"
 )
 
+// PromptService reads interactive terminal answers from Reader.
 type PromptService struct {
 	Reader *bufio.Reader
 }
 
+// NewPromptService returns a PromptService reading from reader.
 func NewPromptService(reader *bufio.Reader) PromptService {
 	return PromptService{
 		Reader: reader,
 	}
 }
 
+// RequiredString prompts for label, re-prompting until a non-empty answer
+// is given.
 func (service PromptService) RequiredString(label string) (string, error) {
 	for {
 		value, err := service.String(label)
@@ -31,6 +35,8 @@ func (service PromptService) RequiredString(label string) (string, error) {
 	}
 }
 
+// String prompts for label and returns the trimmed answer, which may be
+// empty.
 func (service PromptService) String(label string) (string, error) {
 	fmt.Printf("%s: ", label)
 
@@ -42,6 +48,8 @@ func (service PromptService) String(label string) (string, error) {
 	return strings.TrimSpace(value), nil
 }
 
+// StringWithDefault prompts for label, showing defaultValue and returning
+// it unchanged when the answer is empty.
 func (service PromptService) StringWithDefault(label string, defaultValue string) (string, error) {
 	fmt.Printf("%s [%s]: ", label, defaultValue)
 
@@ -58,6 +66,9 @@ func (service PromptService) StringWithDefault(label string, defaultValue string
 	return value, nil
 }
 
+// Bool prompts for a yes/no answer to label, showing defaultValue and
+// re-prompting until a recognized answer (or an empty one, which returns
+// defaultValue) is given.
 func (service PromptService) Bool(label string, defaultValue bool) (bool, error) {
 	defaultLabel := "y/N"
 	if defaultValue {
@@ -89,6 +100,8 @@ func (service PromptService) Bool(label string, defaultValue bool) (bool, error)
 	}
 }
 
+// StringList prompts for label and parses the answer as a comma-separated
+// list via ParseStringList.
 func (service PromptService) StringList(label string) ([]string, error) {
 	value, err := service.String(label)
 	if err != nil {
@@ -98,6 +111,9 @@ func (service PromptService) StringList(label string) ([]string, error) {
 	return ParseStringList(value), nil
 }
 
+// StringListWithDefault prompts for label, showing defaultValues and
+// returning them unchanged when the answer is empty. Answering "none"
+// (case-insensitive) clears the list.
 func (service PromptService) StringListWithDefault(label string, defaultValues []string) ([]string, error) {
 	defaultLabel := "none"
 	if len(defaultValues) > 0 {
@@ -123,6 +139,8 @@ func (service PromptService) StringListWithDefault(label string, defaultValues [
 	return ParseStringList(value), nil
 }
 
+// ParseStringList splits value on commas, trims each item, and drops empty
+// ones. An all-whitespace or empty value returns nil.
 func ParseStringList(value string) []string {
 	value = strings.TrimSpace(value)
 	if value == "" {

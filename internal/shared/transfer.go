@@ -6,13 +6,20 @@ import (
 	"path/filepath"
 )
 
+// TransferDirection selects TransferService's staging direction.
 type TransferDirection string
 
 const (
-	TransferBackup  TransferDirection = "backup"
+	// TransferBackup copies from live data into staging.
+	TransferBackup TransferDirection = "backup"
+	// TransferRestore copies from staging back into live data.
 	TransferRestore TransferDirection = "restore"
 )
 
+// TransferService copies configured container paths between a source and
+// destination root via rsync, in either TransferDirection. It's the
+// staging mechanism, not the backup mechanism itself — see AGENTS.md's
+// "TransferService vs. a backup backend" for why that distinction matters.
 type TransferService struct {
 	Direction TransferDirection
 	SourceDir string
@@ -25,6 +32,9 @@ type TransferService struct {
 	Paths     PathResolver
 }
 
+// Run transfers every configured path of every config in configs, skipping
+// paths already transferred by an earlier config in the same call (so a
+// path shared by two containers is only copied once).
 func (service TransferService) Run(configs []ContainerConfig) error {
 	logger := service.logger()
 	paths := service.pathResolver()
@@ -69,6 +79,8 @@ func (service TransferService) Run(configs []ContainerConfig) error {
 	return nil
 }
 
+// SinglePath rsyncs srcPath to dstPath for container, creating dstPath
+// first if needed.
 func (service TransferService) SinglePath(container string, srcPath string, dstPath string) error {
 	logger := service.logger()
 	fs := service.fileSystem()
@@ -100,6 +112,7 @@ func (service TransferService) SinglePath(container string, srcPath string, dstP
 	return nil
 }
 
+// FixBackupOwnership chowns DestDir (recursively) to owner:group.
 func (service TransferService) FixBackupOwnership(owner string, group string) error {
 	logger := service.logger()
 	runner := service.commandRunner()
@@ -119,6 +132,8 @@ func (service TransferService) FixBackupOwnership(owner string, group string) er
 	return nil
 }
 
+// FixRestoreOwnership chowns (recursively) each configured path of each
+// config in configs, under DestDir, to owner:group.
 func (service TransferService) FixRestoreOwnership(configs []ContainerConfig, owner string, group string) error {
 	logger := service.logger()
 	runner := service.commandRunner()

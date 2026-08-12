@@ -26,6 +26,7 @@ type commandService struct {
 	transfer shared.TransferService
 }
 
+// NewCommand builds the "backup" command.
 func NewCommand(sharedOptions *shared.Options) *cobra.Command {
 	options = sharedOptions
 
@@ -259,29 +260,4 @@ func destinationPath(configuredPath string) string {
 
 func cleanConfiguredPath(configuredPath string) string {
 	return shared.CleanConfiguredPath(configuredPath)
-}
-
-func DockerContainerRunning(container string) (bool, error) {
-	return shared.DockerService{
-		Runner: shared.OSCommandRunner{},
-	}.ContainerRunning(container)
-}
-
-func DockerContainerExists(container string) (bool, error) {
-	return shared.DockerService{
-		Runner: shared.OSCommandRunner{},
-	}.ContainerExists(container)
-}
-
-func LogMessage(level string, message string) {
-	newCommandService().logger.Log(level, message)
-}
-
-func SetLogFile(logFile string) func() {
-	previousLogFile := backupLogFile
-	backupLogFile = logFile
-
-	return func() {
-		backupLogFile = previousLogFile
-	}
 }
