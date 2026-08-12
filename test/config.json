@@ -1,0 +1,48 @@
+{
+  "user": "appuser",
+  "group": "appgroup",
+  "data_dir": "/opt/apps_docker",
+  "staging_dir": "/backups/in",
+  "backend_dir": "/opt/apps_docker/kopia-repos",
+  "backend": "kopia",
+  "backend_settings": {
+    "global_repo_name": "global",
+    "encrypted_password": "v1:H0RTOy05mjpTCH2QQl79BsVLyZJJ4kzZl21CSIiTDlykU0nsu2XYsxbZkp2azkbsd56TSqc=",
+    "storage_type": "s3",
+    "s3": {
+      "bucket": "dackup-test",
+      "endpoint": "localhost:9000",
+      "disable_tls": true,
+      "access_key_id": "minioadmin",
+      "encrypted_secret_access_key": "v1:/qBaPJaSnpNw02+W3YdvigBauzoXdu/Ex45gecxZFAngjL7VsVg="
+    }
+  },
+  "containers": [
+    {
+      "container": "test",
+      "to_stop": true,
+      "paths": [
+        "/data/test",
+        "/config/test"
+      ],
+      "contains": [
+        "test_db",
+        "test_broker"
+      ]
+    },
+    {
+      "container": "test_db",
+      "to_stop": true,
+      "paths": [
+        "/data/test_db"
+      ]
+    },
+    {
+      "container": "test_broker",
+      "to_stop": true,
+      "paths": [
+        "/data/test_broker"
+      ]
+    }
+  ]
+}

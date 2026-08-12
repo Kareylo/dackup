@@ -3,6 +3,7 @@ package backend
 import (
 	"dackup/internal/backend/borg"
 	"dackup/internal/backend/default"
+	"dackup/internal/backend/kopia"
 	"dackup/internal/shared"
 	"encoding/json"
 	"fmt"
@@ -32,6 +33,8 @@ func (factory Factory) GetBackend(name string, settings json.RawMessage) (Backen
 		return defaultbackend.Backend{Logger: factory.Logger}, nil
 	case borg.Name:
 		return factory.getBorgBackend(settings)
+	case kopia.Name:
+		return factory.getKopiaBackend(settings)
 	default:
 		return nil, fmt.Errorf("unknown backend %q", name)
 	}
@@ -48,6 +51,26 @@ func (factory Factory) getBorgBackend(settings json.RawMessage) (Backend, error)
 	}
 
 	return borg.Backend{
+		Config:    config,
+		ReposRoot: factory.BackendDir,
+		Runner:    factory.Runner,
+		Logger:    factory.Logger,
+		Options:   factory.Options,
+		Secrets:   factory.Secrets,
+	}, nil
+}
+
+func (factory Factory) getKopiaBackend(settings json.RawMessage) (Backend, error) {
+	if strings.TrimSpace(factory.BackendDir) == "" {
+		return nil, fmt.Errorf("backend %q requires backend_dir to be set in the main config", kopia.Name)
+	}
+
+	config, err := kopia.ParseConfig(settings)
+	if err != nil {
+		return nil, err
+	}
+
+	return kopia.Backend{
 		Config:    config,
 		ReposRoot: factory.BackendDir,
 		Runner:    factory.Runner,
