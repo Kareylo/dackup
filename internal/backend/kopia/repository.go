@@ -3,6 +3,7 @@ package kopia
 import (
 	"dackup/internal/backend/kopia/storage"
 	"dackup/internal/backend/kopia/storage/filesystem"
+	"dackup/internal/backend/kopia/storage/webdav"
 	"dackup/internal/shared"
 	"encoding/json"
 	"fmt"
@@ -37,12 +38,17 @@ func (backend Backend) snapshotRepo(stagingDir string, repoName string, relative
 		return err
 	}
 
+	env, err := backend.repoEnv(repoName, passwordEnv)
+	if err != nil {
+		return err
+	}
+
 	for _, relativePath := range relativePaths {
 		source := filepath.Join(stagingDir, relativePath)
 
 		backend.log("INFO", fmt.Sprintf("Creating kopia snapshot of %s in repository %q", source, repoName))
 
-		if err := envRunner.RunInDirWithEnv("", passwordEnv, backend.Config.bin(), "snapshot", "create", source, "--config-file="+configPath); err != nil {
+		if err := envRunner.RunInDirWithEnv("", env, backend.Config.bin(), "snapshot", "create", source, "--config-file="+configPath); err != nil {
 			return fmt.Errorf("kopia snapshot create failed for %s: %w", source, err)
 		}
 	}
@@ -87,10 +93,15 @@ func (backend Backend) restoreRepo(stagingDir string, repoName string, relativeP
 		return nil
 	}
 
+	env, err := backend.repoEnv(repoName, passwordEnv)
+	if err != nil {
+		return err
+	}
+
 	for _, relativePath := range relativePaths {
 		target := filepath.Join(stagingDir, relativePath)
 
-		snapshotID, err := backend.latestSnapshotID(envRunner, passwordEnv, target, configPath)
+		snapshotID, err := backend.latestSnapshotID(envRunner, env, target, configPath)
 		if err != nil {
 			return err
 		}
@@ -106,7 +117,7 @@ func (backend Backend) restoreRepo(stagingDir string, repoName string, relativeP
 
 		backend.log("INFO", fmt.Sprintf("Restoring kopia snapshot %s into %s", snapshotID, target))
 
-		if err := envRunner.RunInDirWithEnv("", passwordEnv, backend.Config.bin(), "snapshot", "restore", snapshotID, target, "--config-file="+configPath); err != nil {
+		if err := envRunner.RunInDirWithEnv("", env, backend.Config.bin(), "snapshot", "restore", snapshotID, target, "--config-file="+configPath); err != nil {
 			return fmt.Errorf("kopia snapshot restore failed for %s: %w", snapshotID, err)
 		}
 	}
@@ -180,7 +191,12 @@ func (backend Backend) ensureRepo(envRunner shared.EnvCommandRunner, passwordEnv
 		return nil
 	}
 
-	if err := envRunner.RunInDirWithEnv("", passwordEnv, backend.Config.bin(), "policy", "set", "--global", "--compression="+backend.Config.Compression, "--config-file="+configPath); err != nil {
+	policyEnv, err := backend.repoEnv(repoName, passwordEnv)
+	if err != nil {
+		return err
+	}
+
+	if err := envRunner.RunInDirWithEnv("", policyEnv, backend.Config.bin(), "policy", "set", "--global", "--compression="+backend.Config.Compression, "--config-file="+configPath); err != nil {
 		return fmt.Errorf("failed to set kopia compression policy for %q: %w", repoName, err)
 	}
 
@@ -203,23 +219,33 @@ func (backend Backend) connectArgs(repoName string, configPath string) ([]string
 }
 
 // createArgs builds the full "repository create <type> ..." argument list,
-// mirroring connectArgs. For the filesystem storage type it also ensures
-// the local repository directory exists first, since kopia's filesystem
-// provider expects the target directory to already be there. This is the
-// one place Backend still branches on a specific storage kind rather than
-// going through storage.Provider — local directory creation needs
-// shared.FileSystem, which providers deliberately don't depend on (adding
-// it to the interface just for this one case would force the other seven
-// providers to carry a dependency they never use).
+// mirroring connectArgs. For storage types kopia's own client doesn't
+// prepare the target location for, it does that first: for filesystem, it
+// ensures the local repository directory exists (kopia's filesystem
+// provider expects the target directory to already be there); for webdav,
+// it creates the target collection via WebDAVStorage.EnsureCollection
+// (kopia's webdav client never issues its own MKCOL — confirmed by driving
+// it against a real WebDAV server, see EnsureCollection's doc comment).
+// This is the one place Backend still branches on a specific storage kind
+// rather than going entirely through storage.Provider — both of these
+// needs depend on capabilities (shared.FileSystem, an HTTP client) the
+// interface deliberately doesn't carry, since forcing every provider to
+// depend on them just for these two cases would violate Interface
+// Segregation.
 func (backend Backend) createArgs(repoName string, configPath string) ([]string, []string, error) {
 	invocation, err := backend.storageInvocation(repoName)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	if invocation.Kind == filesystem.Name {
+	switch invocation.Kind {
+	case filesystem.Name:
 		if err := backend.fileSystem().MkdirAll(backend.repoPath(repoName), 0o700); err != nil {
 			return nil, nil, fmt.Errorf("failed to create kopia repository directory %s: %w", backend.repoPath(repoName), err)
+		}
+	case webdav.Name:
+		if err := backend.Config.WebDAV.EnsureCollection(repoName, backend.secretStore()); err != nil {
+			return nil, nil, fmt.Errorf("failed to prepare kopia webdav repository %q: %w", repoName, err)
 		}
 	}
 
@@ -239,6 +265,26 @@ func (backend Backend) storageInvocation(repoName string) (storage.Invocation, e
 	}
 
 	return provider.BuildInvocation(repoName, backend.secretStore())
+}
+
+// repoEnv returns the full environment a kopia CLI call against repoName's
+// already-connected repository needs: the repository password, plus
+// whatever repoName's storage type requires to reach the actual storage
+// (e.g. AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY for s3, STORAGE_EMULATOR_HOST
+// for gcs). kopia's local --config-file caches enough to reconnect to the
+// repository itself without re-supplying the repository password on every
+// call, but it does not persist storage-level env vars — the underlying
+// client library (the AWS/Google SDKs, rclone) re-reads those from the
+// process environment on every invocation, not just the first
+// "repository connect/create" — so every kopia call touching a repository
+// needs this, not just the ones that establish the connection.
+func (backend Backend) repoEnv(repoName string, passwordEnv []string) ([]string, error) {
+	invocation, err := backend.storageInvocation(repoName)
+	if err != nil {
+		return nil, err
+	}
+
+	return append(append([]string{}, passwordEnv...), invocation.Env...), nil
 }
 
 func (backend Backend) passwordEnv() ([]string, error) {

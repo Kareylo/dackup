@@ -1,0 +1,45 @@
+{
+  "user": "appuser",
+  "group": "appgroup",
+  "data_dir": "./test/volumes",
+  "staging_dir": "./test/test_backups/in",
+  "backend_dir": "./test/test_backups/repo-kopia",
+  "backend": "kopia",
+  "backend_settings": {
+    "global_repo_name": "global",
+    "encrypted_password": "v1:eKz3kQJWLrj1XTCS+JmBCJWsI29TNHRDIBOGRVoytsVIAFu2R5nVCX4SwBnkU686cvBXi4KmOuYalcCV",
+    "storage_type": "gcs",
+    "gcs": {
+      "bucket": "dackup-test",
+      "emulator_host": "localhost:4443"
+    }
+  },
+  "containers": [
+    {
+      "container": "test",
+      "to_stop": true,
+      "paths": [
+        "/data/test",
+        "/config/test"
+      ],
+      "contains": [
+        "test_db",
+        "test_broker"
+      ]
+    },
+    {
+      "container": "test_db",
+      "to_stop": true,
+      "paths": [
+        "/data/test_db"
+      ]
+    },
+    {
+      "container": "test_broker",
+      "to_stop": true,
+      "paths": [
+        "/data/test_broker"
+      ]
+    }
+  ]
+}

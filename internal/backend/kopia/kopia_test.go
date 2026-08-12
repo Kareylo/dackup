@@ -2,6 +2,7 @@ package kopia
 
 import (
 	"dackup/internal/backend/kopia/storage/filesystem"
+	"dackup/internal/backend/kopia/storage/s3"
 	"dackup/internal/shared"
 	"fmt"
 	"os"
@@ -245,6 +246,35 @@ func TestBackend_Backup_ConnectsToExistingRepoThenCreatesSnapshot(t *testing.T) 
 	}
 }
 
+// TestBackend_Backup_SnapshotCreateCarriesStorageEnv guards against a real
+// bug found via live testing: kopia's local --config-file caches enough to
+// reconnect to a repository without re-supplying its own password, but the
+// underlying client library (here, the AWS SDK) re-reads env-var-based
+// storage credentials fresh on every invocation — so "snapshot create"
+// needs them too, not just the initial "repository connect/create". S3
+// (env-var credentials) is used here specifically because filesystem, the
+// other tests' default storage type, has no extra env vars to omit —
+// omitting them would pass either way and not catch this.
+func TestBackend_Backup_SnapshotCreateCarriesStorageEnv(t *testing.T) {
+	runner := &fakeEnvRunner{}
+	backend := testBackend(runner, newFakeFileSystem(), &fakeLogger{})
+	backend.Config.StorageType = s3.Name
+	backend.Config.S3 = &s3.Storage{Bucket: "my-bucket", AccessKeyID: "AKID", EncryptedSecretAccessKey: "enc:secret"}
+
+	if err := backend.Backup("/staging"); err != nil {
+		t.Fatalf("Backup returned error: %v", err)
+	}
+
+	if len(runner.calls) != 2 {
+		t.Fatalf("expected 2 calls (connect, snapshot create), got %d: %+v", len(runner.calls), runner.calls)
+	}
+
+	snapshotCall := runner.calls[1]
+	if !containsEnv(snapshotCall.env, "AWS_ACCESS_KEY_ID=AKID") || !containsEnv(snapshotCall.env, "AWS_SECRET_ACCESS_KEY=secret") {
+		t.Fatalf("expected snapshot create to carry S3 credentials, got env %v", snapshotCall.env)
+	}
+}
+
 func TestBackend_Backup_CreatesRepoWhenConnectFails(t *testing.T) {
 	runner := &fakeEnvRunner{
 		runErrs: map[string]error{
@@ -417,6 +447,39 @@ func TestBackend_Restore_RestoresLatestSnapshot(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected restore target to be created before restore, mkdirs: %v", fs.mkdirs)
+	}
+}
+
+// TestBackend_Restore_SnapshotListAndRestoreCarryStorageEnv is the restore
+// side of TestBackend_Backup_SnapshotCreateCarriesStorageEnv's regression
+// guard: "snapshot list" and "snapshot restore" both need storage
+// credentials on every call, not just the initial "repository connect".
+func TestBackend_Restore_SnapshotListAndRestoreCarryStorageEnv(t *testing.T) {
+	runner := &fakeEnvRunner{
+		outputs: map[string][]byte{
+			"snapshot list /staging --json --config-file=" + globalConfigPath: []byte(`[{"id":"k1a"}]`),
+		},
+	}
+	backend := testBackend(runner, newFakeFileSystem(), &fakeLogger{})
+	backend.Config.StorageType = s3.Name
+	backend.Config.S3 = &s3.Storage{Bucket: "my-bucket", AccessKeyID: "AKID", EncryptedSecretAccessKey: "enc:secret"}
+
+	if err := backend.Restore("/staging"); err != nil {
+		t.Fatalf("Restore returned error: %v", err)
+	}
+
+	if len(runner.calls) != 3 {
+		t.Fatalf("expected 3 calls (connect, list, restore), got %d: %+v", len(runner.calls), runner.calls)
+	}
+
+	listCall := runner.calls[1]
+	if !containsEnv(listCall.env, "AWS_ACCESS_KEY_ID=AKID") || !containsEnv(listCall.env, "AWS_SECRET_ACCESS_KEY=secret") {
+		t.Fatalf("expected snapshot list to carry S3 credentials, got env %v", listCall.env)
+	}
+
+	restoreCall := runner.calls[2]
+	if !containsEnv(restoreCall.env, "AWS_ACCESS_KEY_ID=AKID") || !containsEnv(restoreCall.env, "AWS_SECRET_ACCESS_KEY=secret") {
+		t.Fatalf("expected snapshot restore to carry S3 credentials, got env %v", restoreCall.env)
 	}
 }
 

@@ -105,7 +105,7 @@ func TestStorage_BuildInvocationWithPassword(t *testing.T) {
 		t.Fatalf("BuildInvocation returned error: %v", err)
 	}
 
-	wantArgs := []string{"--host=backup.example.com", "--port=2222", "--username=dackup", "--path=/srv/backups/myrepo", "--known-hosts=/home/dackup/.ssh/known_hosts", "--password=hunter2"}
+	wantArgs := []string{"--host=backup.example.com", "--port=2222", "--username=dackup", "--path=/srv/backups/myrepo", "--known-hosts=/home/dackup/.ssh/known_hosts", "--sftp-password=hunter2"}
 	if !equalArgs(invocation.Args, wantArgs) {
 		t.Fatalf("expected args %v, got %v", wantArgs, invocation.Args)
 	}

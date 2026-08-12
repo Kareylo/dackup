@@ -2,6 +2,8 @@ package webdav
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -83,5 +85,60 @@ func TestStorage_BuildInvocationWithAuth(t *testing.T) {
 	wantArgs := []string{"--url=https://webdav.example.com/backups/myrepo", "--webdav-username=dackup", "--webdav-password=hunter2"}
 	if !equalArgs(invocation.Args, wantArgs) {
 		t.Fatalf("expected args %v, got %v", wantArgs, invocation.Args)
+	}
+}
+
+func TestStorage_EnsureCollectionSendsMKCOLWithAuth(t *testing.T) {
+	var gotMethod, gotPath, gotUser, gotPassword string
+	var gotAuthOK bool
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotUser, gotPassword, gotAuthOK = r.BasicAuth()
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+
+	s := Storage{URL: server.URL, Username: "dackup", EncryptedPassword: "enc:hunter2"}
+
+	if err := s.EnsureCollection("myrepo", fakeSecretStore{}); err != nil {
+		t.Fatalf("EnsureCollection returned error: %v", err)
+	}
+
+	if gotMethod != "MKCOL" {
+		t.Fatalf("expected MKCOL request, got %q", gotMethod)
+	}
+	if gotPath != "/myrepo" {
+		t.Fatalf("expected request path %q, got %q", "/myrepo", gotPath)
+	}
+	if !gotAuthOK || gotUser != "dackup" || gotPassword != "hunter2" {
+		t.Fatalf("expected basic auth dackup/hunter2, got ok=%v user=%q password=%q", gotAuthOK, gotUser, gotPassword)
+	}
+}
+
+func TestStorage_EnsureCollectionAlreadyExistsIsNotAnError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}))
+	defer server.Close()
+
+	s := Storage{URL: server.URL}
+
+	if err := s.EnsureCollection("myrepo", fakeSecretStore{}); err != nil {
+		t.Fatalf("expected 405 (already exists) to not be an error, got %v", err)
+	}
+}
+
+func TestStorage_EnsureCollectionReturnsErrorOnFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+
+	s := Storage{URL: server.URL}
+
+	if err := s.EnsureCollection("myrepo", fakeSecretStore{}); err == nil {
+		t.Fatal("expected error for a non-2xx, non-405 status")
 	}
 }

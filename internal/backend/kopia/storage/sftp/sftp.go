@@ -96,7 +96,7 @@ func (s Storage) BuildInvocation(repoName string, secrets shared.SecretStore) (s
 		if err != nil {
 			return storage.Invocation{}, fmt.Errorf("failed to decrypt kopia sftp password: %w", err)
 		}
-		args = append(args, "--password="+password)
+		args = append(args, "--sftp-password="+password)
 	}
 
 	return storage.Invocation{Kind: Name, Args: args}, nil

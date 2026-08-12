@@ -12,12 +12,14 @@ LDFLAGS ?= -s -w -X dackup/cmd/version.Version=$(VERSION)
 .PHONY: help
 help:
 	@echo "Available targets:"
-	@echo "  make deps       Install required dependencies when possible"
-	@echo "  make build      Build $(APP_NAME)"
-	@echo "  make test       Run tests"
-	@echo "  make install    Build and install $(APP_NAME) to $(INSTALL_BIN)"
-	@echo "  make uninstall  Remove $(INSTALL_BIN)"
-	@echo "  make clean      Remove build artifacts"
+	@echo "  make deps                Install required dependencies when possible"
+	@echo "  make build               Build $(APP_NAME)"
+	@echo "  make test                Run tests"
+	@echo "  make test-integration    Start test/compose.yml and run kopia storage integration tests"
+	@echo "  make test-integration-down  Stop the containers started by test-integration"
+	@echo "  make install             Build and install $(APP_NAME) to $(INSTALL_BIN)"
+	@echo "  make uninstall           Remove $(INSTALL_BIN)"
+	@echo "  make clean               Remove build artifacts"
 
 .PHONY: deps
 deps:
@@ -81,6 +83,30 @@ build: deps
 .PHONY: test
 test: deps
 	$(GO) test ./...
+
+.PHONY: test-integration
+test-integration: deps
+	@if ! command -v docker >/dev/null 2>&1; then \
+		echo "Docker is required for integration tests; see 'make deps'."; \
+		exit 1; \
+	fi
+	@echo "Starting test/compose.yml storage emulator containers..."
+	docker compose -f test/compose.yml up -d
+	@echo "Waiting for bucket/container setup to finish..."
+	@for svc in test_minio_init test_azurite_init test_gcs_init; do \
+		code=$$(docker wait $$svc); \
+		if [ "$$code" != "0" ]; then \
+			echo "$$svc failed (exit $$code); see: docker logs $$svc" >&2; \
+			exit 1; \
+		fi; \
+	done
+	@echo "Running kopia storage integration tests..."
+	$(GO) test -tags=integration ./...
+
+.PHONY: test-integration-down
+test-integration-down:
+	@echo "Stopping test/compose.yml containers..."
+	docker compose -f test/compose.yml down -v
 
 .PHONY: install
 install: build
