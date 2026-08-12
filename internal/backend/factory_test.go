@@ -3,6 +3,7 @@ package backend
 import (
 	"dackup/internal/backend/borg"
 	"dackup/internal/backend/default"
+	"dackup/internal/backend/kopia"
 	"testing"
 )
 
@@ -22,7 +23,7 @@ func TestFactory_GetBackend_EmptyNameReturnsDefaultBackend(t *testing.T) {
 func TestFactory_GetBackend_UnknownNameReturnsError(t *testing.T) {
 	factory := Factory{}
 
-	_, err := factory.GetBackend("kopia", nil)
+	_, err := factory.GetBackend("restic", nil)
 	if err == nil {
 		t.Fatal("expected error for unknown backend name, got nil")
 	}
@@ -61,5 +62,41 @@ func TestFactory_GetBackend_BorgWithValidSettingsReturnsBorgBackend(t *testing.T
 
 	if borgBackend.ReposRoot != "/mnt/backup/borg-repos" {
 		t.Fatalf("expected ReposRoot %q, got %q", "/mnt/backup/borg-repos", borgBackend.ReposRoot)
+	}
+}
+
+func TestFactory_GetBackend_KopiaWithoutBackendDirReturnsError(t *testing.T) {
+	factory := Factory{}
+
+	_, err := factory.GetBackend(kopia.Name, []byte(`{"encrypted_password":"enc:secret"}`))
+	if err == nil {
+		t.Fatal("expected error when backend_dir is not set")
+	}
+}
+
+func TestFactory_GetBackend_KopiaWithInvalidSettingsReturnsError(t *testing.T) {
+	factory := Factory{BackendDir: "/mnt/backup/kopia-repos"}
+
+	_, err := factory.GetBackend(kopia.Name, []byte(`{}`))
+	if err == nil {
+		t.Fatal("expected error when encrypted_password is not set")
+	}
+}
+
+func TestFactory_GetBackend_KopiaWithValidSettingsReturnsKopiaBackend(t *testing.T) {
+	factory := Factory{BackendDir: "/mnt/backup/kopia-repos"}
+
+	got, err := factory.GetBackend(kopia.Name, []byte(`{"encrypted_password":"enc:secret"}`))
+	if err != nil {
+		t.Fatalf("GetBackend returned error: %v", err)
+	}
+
+	kopiaBackend, ok := got.(kopia.Backend)
+	if !ok {
+		t.Fatalf("expected kopia.Backend, got %#v", got)
+	}
+
+	if kopiaBackend.ReposRoot != "/mnt/backup/kopia-repos" {
+		t.Fatalf("expected ReposRoot %q, got %q", "/mnt/backup/kopia-repos", kopiaBackend.ReposRoot)
 	}
 }

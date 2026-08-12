@@ -1,6 +1,9 @@
 package backend
 
-import "dackup/internal/backend/borg"
+import (
+	"dackup/internal/backend/borg"
+	"dackup/internal/backend/kopia"
+)
 
 // AvailableBackends lists the names of concrete backends that can be
 // selected via the "dackup backend" command, in addition to the implicit
@@ -8,5 +11,5 @@ import "dackup/internal/backend/borg"
 // registering its name here plus adding one case each to ParseSettings and
 // Factory.GetBackend.
 func AvailableBackends() []string {
-	return []string{borg.Name}
+	return []string{borg.Name, kopia.Name}
 }
