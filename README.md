@@ -364,7 +364,7 @@ Here is a list of todo things that should be implemented :
 - [ ] Use backend for backup usage:
   - [ ] rclone
   - [x] Borg
-  - [ ] Kopia
+  - [x] Kopia
   - [ ] resting
 - [ ] Add podman integration, not only docker
 - [ ] More ... ?
