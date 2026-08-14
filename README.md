@@ -367,6 +367,7 @@ Here is a list of todo things that should be implemented :
   - [ ] rclone
   - [x] Borg
   - [x] Kopia
-  - [ ] resting
+  - [ ] restic
+  - [ ] ... ?
 - [ ] Add podman integration, not only docker
 - [ ] More ... ?

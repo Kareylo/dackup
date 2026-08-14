@@ -125,7 +125,11 @@ func (service commandService) fileSystem() shared.FileSystem {
 }
 
 func runBackendCreate() error {
-	service := newCommandService(bufio.NewReader(os.Stdin))
+	return runBackendCreateWithReader(bufio.NewReader(os.Stdin))
+}
+
+func runBackendCreateWithReader(reader *bufio.Reader) error {
+	service := newCommandService(reader)
 
 	if !shared.FileExists(configFilePath) {
 		return fmt.Errorf("configuration file not found at %s; run \"dackup config init\" first", configFilePath)
@@ -184,7 +188,11 @@ func runBackendShow() error {
 }
 
 func runBackendUpdate() error {
-	service := newCommandService(bufio.NewReader(os.Stdin))
+	return runBackendUpdateWithReader(bufio.NewReader(os.Stdin))
+}
+
+func runBackendUpdateWithReader(reader *bufio.Reader) error {
+	service := newCommandService(reader)
 
 	if !shared.FileExists(configFilePath) {
 		return fmt.Errorf("configuration file not found at %s; run \"dackup config init\" first", configFilePath)
@@ -221,7 +229,11 @@ func runBackendUpdate() error {
 }
 
 func runBackendRemove() error {
-	service := newCommandService(bufio.NewReader(os.Stdin))
+	return runBackendRemoveWithReader(bufio.NewReader(os.Stdin))
+}
+
+func runBackendRemoveWithReader(reader *bufio.Reader) error {
+	service := newCommandService(reader)
 
 	if !shared.FileExists(configFilePath) {
 		return fmt.Errorf("configuration file not found at %s; run \"dackup config init\" first", configFilePath)

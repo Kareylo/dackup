@@ -4,9 +4,13 @@ import (
 	"bufio"
 	"dackup/internal/backend/borg"
 	"dackup/internal/backend/kopia"
+	"dackup/internal/backend/kopia/storage/azure"
+	"dackup/internal/backend/kopia/storage/b2"
 	"dackup/internal/backend/kopia/storage/filesystem"
+	"dackup/internal/backend/kopia/storage/gcs"
 	"dackup/internal/backend/kopia/storage/s3"
 	"dackup/internal/backend/kopia/storage/sftp"
+	"dackup/internal/backend/kopia/storage/webdav"
 	"dackup/internal/shared"
 	"encoding/json"
 	"os"
@@ -862,6 +866,236 @@ func TestPrintBackend_NoPanicWhenConfigured(t *testing.T) {
 		Backend:         "borg",
 		BackendSettings: []byte(`{"global_repo_name":"global","encrypted_passphrase":"v1:abc123"}`),
 	})
+}
+
+func TestPrintBackend_NoSettingsPrintsNone(t *testing.T) {
+	printBackend(shared.DackupConfig{Backend: "borg"})
+}
+
+func TestPromptBackendSettings_ConfiguresKopia(t *testing.T) {
+	// bin -> (empty), global_repo_name -> (default), storage_type ->
+	// (default, filesystem), password -> hunter2, compression -> (empty).
+	service := newTestServiceWithSecretKey(t, "\n\n\nhunter2\n\n")
+
+	got, err := service.promptBackendSettings(kopia.Name, "", nil)
+	if err != nil {
+		t.Fatalf("promptBackendSettings returned error: %v", err)
+	}
+
+	var settings map[string]any
+	if err := json.Unmarshal(got, &settings); err != nil {
+		t.Fatalf("failed to unmarshal settings: %v", err)
+	}
+
+	if settings["global_repo_name"] != kopia.DefaultGlobalRepoName {
+		t.Fatalf("expected global_repo_name %q, got %v", kopia.DefaultGlobalRepoName, settings["global_repo_name"])
+	}
+}
+
+func TestPromptBackendSettings_PrefillsKopiaFromCurrentSettingsForSameBackend(t *testing.T) {
+	current := json.RawMessage(`{"global_repo_name":"prod","encrypted_password":"v1:existing"}`)
+
+	// bin -> (empty), global_repo_name -> (kept), storage_type -> (default,
+	// filesystem), password -> (empty, keep current), compression -> (empty).
+	service := newTestServiceWithSecretKey(t, "\n\n\n\n\n")
+
+	got, err := service.promptBackendSettings(kopia.Name, kopia.Name, current)
+	if err != nil {
+		t.Fatalf("promptBackendSettings returned error: %v", err)
+	}
+
+	var settings map[string]any
+	if err := json.Unmarshal(got, &settings); err != nil {
+		t.Fatalf("failed to unmarshal settings: %v", err)
+	}
+
+	if settings["global_repo_name"] != "prod" {
+		t.Fatalf("expected global_repo_name to stay %q, got %v", "prod", settings["global_repo_name"])
+	}
+}
+
+func TestPromptBackendSettings_InvalidCurrentKopiaSettingsFallBackToDefaults(t *testing.T) {
+	current := json.RawMessage(`{invalid-json`)
+
+	// bin -> (empty), global_repo_name -> (default), storage_type ->
+	// (default, filesystem), password -> hunter2, compression -> (empty).
+	service := newTestServiceWithSecretKey(t, "\n\n\nhunter2\n\n")
+
+	got, err := service.promptBackendSettings(kopia.Name, kopia.Name, current)
+	if err != nil {
+		t.Fatalf("promptBackendSettings returned error: %v", err)
+	}
+
+	var settings map[string]any
+	if err := json.Unmarshal(got, &settings); err != nil {
+		t.Fatalf("failed to unmarshal settings: %v", err)
+	}
+
+	if settings["global_repo_name"] != kopia.DefaultGlobalRepoName {
+		t.Fatalf("expected global_repo_name to fall back to default %q, got %v", kopia.DefaultGlobalRepoName, settings["global_repo_name"])
+	}
+}
+
+func TestPromptBackendSettings_InvalidCurrentBorgSettingsFallBackToDefaults(t *testing.T) {
+	current := json.RawMessage(`{invalid-json`)
+
+	// bin -> (empty), global_repo_name -> (default), encryption -> none,
+	// compression -> (empty).
+	service := newTestServiceWithSecretKey(t, "\n\nnone\n\n")
+
+	got, err := service.promptBackendSettings(borg.Name, borg.Name, current)
+	if err != nil {
+		t.Fatalf("promptBackendSettings returned error: %v", err)
+	}
+
+	var settings map[string]any
+	if err := json.Unmarshal(got, &settings); err != nil {
+		t.Fatalf("failed to unmarshal settings: %v", err)
+	}
+
+	if settings["global_repo_name"] != borg.DefaultGlobalRepoName {
+		t.Fatalf("expected global_repo_name to fall back to default %q, got %v", borg.DefaultGlobalRepoName, settings["global_repo_name"])
+	}
+}
+
+func TestPromptKopiaSettings_SelectsSFTPStorageAndGathersItsSettings(t *testing.T) {
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	if err := os.WriteFile(keyPath, []byte("fake key"), 0o600); err != nil {
+		t.Fatalf("failed to create fake keyfile: %v", err)
+	}
+
+	// bin -> (empty), global_repo_name -> (default), storage_type -> sftp,
+	// host, port -> (default), username, path, keyfile_path,
+	// known_hosts_path -> (empty), password -> hunter2, compression -> (empty).
+	input := "\n\nsftp\nbackup.example.com\n\ndackup\n/srv/backups\n" + keyPath + "\n\nhunter2\n\n"
+	service := newTestServiceWithSecretKey(t, input)
+
+	got, err := service.promptKopiaSettings(kopia.DefaultConfig())
+	if err != nil {
+		t.Fatalf("promptKopiaSettings returned error: %v", err)
+	}
+
+	var settings map[string]any
+	if err := json.Unmarshal(got, &settings); err != nil {
+		t.Fatalf("failed to unmarshal settings: %v", err)
+	}
+
+	if settings["storage_type"] != sftp.Name {
+		t.Fatalf("expected storage_type %q, got %v", sftp.Name, settings["storage_type"])
+	}
+
+	if _, ok := settings["sftp"].(map[string]any); !ok {
+		t.Fatalf("expected an sftp settings block, got %#v", settings["sftp"])
+	}
+}
+
+func TestPromptKopiaSettings_SelectsB2StorageAndGathersItsSettings(t *testing.T) {
+	// bin -> (empty), global_repo_name -> (default), storage_type -> b2,
+	// bucket, key_id, application_key, prefix -> (empty), password ->
+	// hunter2, compression -> (empty).
+	input := "\n\nb2\nmy-bucket\nkey-id\napplicationkey\n\nhunter2\n\n"
+	service := newTestServiceWithSecretKey(t, input)
+
+	got, err := service.promptKopiaSettings(kopia.DefaultConfig())
+	if err != nil {
+		t.Fatalf("promptKopiaSettings returned error: %v", err)
+	}
+
+	var settings map[string]any
+	if err := json.Unmarshal(got, &settings); err != nil {
+		t.Fatalf("failed to unmarshal settings: %v", err)
+	}
+
+	if settings["storage_type"] != b2.Name {
+		t.Fatalf("expected storage_type %q, got %v", b2.Name, settings["storage_type"])
+	}
+
+	if _, ok := settings["b2"].(map[string]any); !ok {
+		t.Fatalf("expected a b2 settings block, got %#v", settings["b2"])
+	}
+}
+
+func TestPromptKopiaSettings_SelectsAzureStorageAndGathersItsSettings(t *testing.T) {
+	// bin -> (empty), global_repo_name -> (default), storage_type -> azure,
+	// container, storage_account, storage_key, prefix -> (empty), password
+	// -> hunter2, compression -> (empty).
+	input := "\n\nazure\nmy-container\nmyaccount\nstoragekey\n\nhunter2\n\n"
+	service := newTestServiceWithSecretKey(t, input)
+
+	got, err := service.promptKopiaSettings(kopia.DefaultConfig())
+	if err != nil {
+		t.Fatalf("promptKopiaSettings returned error: %v", err)
+	}
+
+	var settings map[string]any
+	if err := json.Unmarshal(got, &settings); err != nil {
+		t.Fatalf("failed to unmarshal settings: %v", err)
+	}
+
+	if settings["storage_type"] != azure.Name {
+		t.Fatalf("expected storage_type %q, got %v", azure.Name, settings["storage_type"])
+	}
+
+	if _, ok := settings["azure"].(map[string]any); !ok {
+		t.Fatalf("expected an azure settings block, got %#v", settings["azure"])
+	}
+}
+
+func TestPromptKopiaSettings_SelectsGCSStorageAndGathersItsSettings(t *testing.T) {
+	credentialsPath := filepath.Join(t.TempDir(), "gcs-credentials.json")
+	if err := os.WriteFile(credentialsPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("failed to create fake credentials file: %v", err)
+	}
+
+	// bin -> (empty), global_repo_name -> (default), storage_type -> gcs,
+	// bucket, credentials_file_path, prefix -> (empty), password -> hunter2,
+	// compression -> (empty).
+	input := "\n\ngcs\nmy-bucket\n" + credentialsPath + "\n\nhunter2\n\n"
+	service := newTestServiceWithSecretKey(t, input)
+
+	got, err := service.promptKopiaSettings(kopia.DefaultConfig())
+	if err != nil {
+		t.Fatalf("promptKopiaSettings returned error: %v", err)
+	}
+
+	var settings map[string]any
+	if err := json.Unmarshal(got, &settings); err != nil {
+		t.Fatalf("failed to unmarshal settings: %v", err)
+	}
+
+	if settings["storage_type"] != gcs.Name {
+		t.Fatalf("expected storage_type %q, got %v", gcs.Name, settings["storage_type"])
+	}
+
+	if _, ok := settings["gcs"].(map[string]any); !ok {
+		t.Fatalf("expected a gcs settings block, got %#v", settings["gcs"])
+	}
+}
+
+func TestPromptKopiaSettings_SelectsWebDAVStorageAndGathersItsSettings(t *testing.T) {
+	// bin -> (empty), global_repo_name -> (default), storage_type ->
+	// webdav, url, username -> (empty), password -> hunter2,
+	// compression -> (empty).
+	input := "\n\nwebdav\nhttps://webdav.example.com\n\nhunter2\n\n"
+	service := newTestServiceWithSecretKey(t, input)
+
+	got, err := service.promptKopiaSettings(kopia.DefaultConfig())
+	if err != nil {
+		t.Fatalf("promptKopiaSettings returned error: %v", err)
+	}
+
+	var settings map[string]any
+	if err := json.Unmarshal(got, &settings); err != nil {
+		t.Fatalf("failed to unmarshal settings: %v", err)
+	}
+
+	if settings["storage_type"] != webdav.Name {
+		t.Fatalf("expected storage_type %q, got %v", webdav.Name, settings["storage_type"])
+	}
+
+	if _, ok := settings["webdav"].(map[string]any); !ok {
+		t.Fatalf("expected a webdav settings block, got %#v", settings["webdav"])
+	}
 }
 
 func TestMaskEncryptedSettings_MasksEncryptedFieldsOnly(t *testing.T) {

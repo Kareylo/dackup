@@ -162,6 +162,61 @@ func TestReadDackupConfig_InvalidJSONReturnsError(t *testing.T) {
 	}
 }
 
+func TestDefaultDackupConfigPath_ReturnsNonEmptyPath(t *testing.T) {
+	got, err := defaultDackupConfigPath()
+	if err != nil {
+		t.Fatalf("defaultDackupConfigPath returned error: %v", err)
+	}
+
+	if got == "" {
+		t.Fatal("expected a non-empty default config path")
+	}
+}
+
+func TestEffectiveDackupConfig_ReturnsInlineContainers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	config := dackupConfig{
+		User:  "u",
+		Group: "g",
+		Containers: []shared.ContainerConfig{
+			{Container: "web", ToStop: true},
+		},
+	}
+	if err := writeDackupConfig(path, config); err != nil {
+		t.Fatalf("writeDackupConfig returned error: %v", err)
+	}
+
+	got, effectivePath, err := effectiveDackupConfig(path)
+	if err != nil {
+		t.Fatalf("effectiveDackupConfig returned error: %v", err)
+	}
+
+	assertPathEqual(t, effectivePath, path)
+
+	if len(got.Containers) != 1 || got.Containers[0].Container != "web" {
+		t.Fatalf("expected inline containers to be returned, got %#v", got.Containers)
+	}
+}
+
+func TestFileExists_ReturnsTrueForExistingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := writeDackupConfig(path, dackupConfig{User: "u", Group: "g"}); err != nil {
+		t.Fatalf("writeDackupConfig returned error: %v", err)
+	}
+
+	if !fileExists(path) {
+		t.Fatalf("expected fileExists to return true for %q", path)
+	}
+}
+
+func TestFileExists_ReturnsFalseForMissingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.json")
+
+	if fileExists(path) {
+		t.Fatalf("expected fileExists to return false for %q", path)
+	}
+}
+
 func TestReadDackupConfig_MissingFileReturnsError(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "missing.json")

@@ -75,6 +75,83 @@ func TestRunConfigInitWithReader_DeclinedOverwriteLeavesFileUnchanged(t *testing
 	}
 }
 
+func TestRunConfigInitWithReader_CustomContainersFileCreatesBothFiles(t *testing.T) {
+	withConfigFilePath(t, filepath.Join(t.TempDir(), "config.json"))
+	customPath := filepath.Join(t.TempDir(), "containers.json")
+
+	// owner, group, dataDir, stagingDir -> (default), useCustomFile -> y,
+	// customPath, createCustom -> y, container -> web, toStop -> n,
+	// paths -> /data, contains -> (empty), addAnother -> n.
+	input := "owner\ngroup\n\n\ny\n" + customPath + "\ny\nweb\nn\n/data\n\nn\n"
+
+	if err := runConfigInitWithReader(readerFor(input)); err != nil {
+		t.Fatalf("runConfigInitWithReader returned error: %v", err)
+	}
+
+	mainConfig, err := shared.ReadDackupConfig(configFilePath)
+	if err != nil {
+		t.Fatalf("failed to read main config: %v", err)
+	}
+
+	if mainConfig.ConfigFile != customPath {
+		t.Fatalf("expected config_file %q, got %q", customPath, mainConfig.ConfigFile)
+	}
+
+	containers, err := shared.ReadContainerConfigsFromPath(customPath)
+	if err != nil {
+		t.Fatalf("failed to read custom containers file: %v", err)
+	}
+
+	want := []shared.ContainerConfig{{Container: "web", ToStop: false, Paths: []string{"/data"}}}
+	if !reflect.DeepEqual(containers, want) {
+		t.Fatalf("expected containers %#v, got %#v", want, containers)
+	}
+}
+
+func TestRunConfigInitWithReader_CustomContainersFileDeclinedCreationLeavesItMissing(t *testing.T) {
+	withConfigFilePath(t, filepath.Join(t.TempDir(), "config.json"))
+	customPath := filepath.Join(t.TempDir(), "containers.json")
+
+	// owner, group, dataDir, stagingDir -> (default), useCustomFile -> y,
+	// customPath, createCustom -> n.
+	input := "owner\ngroup\n\n\ny\n" + customPath + "\nn\n"
+
+	if err := runConfigInitWithReader(readerFor(input)); err != nil {
+		t.Fatalf("runConfigInitWithReader returned error: %v", err)
+	}
+
+	if shared.FileExists(customPath) {
+		t.Fatal("expected the custom containers file to not be created")
+	}
+}
+
+func TestReadExistingContainerConfigs_CreatesFileWhenMissingAndConfirmed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "containers.json")
+	service := commandService{prompt: shared.NewPromptService(readerFor("y\n"))}
+
+	configs, err := service.readExistingContainerConfigs(path)
+	if err != nil {
+		t.Fatalf("readExistingContainerConfigs returned error: %v", err)
+	}
+
+	if len(configs) != 0 {
+		t.Fatalf("expected no containers, got %#v", configs)
+	}
+
+	if !shared.FileExists(path) {
+		t.Fatal("expected the containers file to be created")
+	}
+}
+
+func TestReadExistingContainerConfigs_ReturnsErrorWhenMissingAndDeclined(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "containers.json")
+	service := commandService{prompt: shared.NewPromptService(readerFor("n\n"))}
+
+	if _, err := service.readExistingContainerConfigs(path); err == nil {
+		t.Fatal("expected an error when creation is declined")
+	}
+}
+
 func TestRunConfigAddContainerWithReader_AppendsContainer(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	withConfigFilePath(t, path)

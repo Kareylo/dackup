@@ -1,8 +1,14 @@
 package kopia
 
 import (
+	"dackup/internal/backend/kopia/storage/azure"
+	"dackup/internal/backend/kopia/storage/b2"
 	"dackup/internal/backend/kopia/storage/filesystem"
+	"dackup/internal/backend/kopia/storage/gcs"
+	"dackup/internal/backend/kopia/storage/rclone"
 	"dackup/internal/backend/kopia/storage/s3"
+	"dackup/internal/backend/kopia/storage/sftp"
+	"dackup/internal/backend/kopia/storage/webdav"
 	"dackup/internal/shared"
 	"fmt"
 	"os"
@@ -173,6 +179,62 @@ func TestConfig_ValidateUnknownStorageTypeReturnsError(t *testing.T) {
 	config := Config{GlobalRepoName: "global", EncryptedPassword: "enc:secret", StorageType: "dropbox"}
 	if err := config.Validate(); err == nil {
 		t.Fatal("expected error for unknown storage_type")
+	}
+}
+
+func TestConfig_Provider_ReturnsTheConfiguredStorageProvider(t *testing.T) {
+	cases := []struct {
+		name   string
+		config Config
+	}{
+		{filesystem.Name, Config{StorageType: filesystem.Name}},
+		{s3.Name, Config{StorageType: s3.Name, S3: &s3.Storage{}}},
+		{sftp.Name, Config{StorageType: sftp.Name, SFTP: &sftp.Storage{}}},
+		{b2.Name, Config{StorageType: b2.Name, B2: &b2.Storage{}}},
+		{azure.Name, Config{StorageType: azure.Name, Azure: &azure.Storage{}}},
+		{gcs.Name, Config{StorageType: gcs.Name, GCS: &gcs.Storage{}}},
+		{rclone.Name, Config{StorageType: rclone.Name, Rclone: &rclone.Storage{}}},
+		{webdav.Name, Config{StorageType: webdav.Name, WebDAV: &webdav.Storage{}}},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			provider, err := tt.config.provider("")
+			if err != nil {
+				t.Fatalf("provider returned error: %v", err)
+			}
+
+			if provider == nil {
+				t.Fatal("expected a non-nil provider")
+			}
+		})
+	}
+}
+
+func TestConfig_Provider_MissingSettingsBlockReturnsError(t *testing.T) {
+	cases := []string{s3.Name, sftp.Name, b2.Name, azure.Name, gcs.Name, rclone.Name, webdav.Name}
+
+	for _, storageType := range cases {
+		t.Run(storageType, func(t *testing.T) {
+			_, err := (Config{StorageType: storageType}).provider("")
+			if err == nil {
+				t.Fatalf("expected an error for a missing %q settings block", storageType)
+			}
+		})
+	}
+}
+
+func TestBackend_BinaryName(t *testing.T) {
+	got := Backend{Config: Config{Bin: "/usr/local/bin/kopia"}}.BinaryName()
+	if got != "/usr/local/bin/kopia" {
+		t.Fatalf("expected %q, got %q", "/usr/local/bin/kopia", got)
+	}
+}
+
+func TestBackend_BinaryName_DefaultsToBareCommandName(t *testing.T) {
+	got := Backend{}.BinaryName()
+	if got != DefaultBin {
+		t.Fatalf("expected %q, got %q", DefaultBin, got)
 	}
 }
 

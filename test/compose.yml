@@ -167,6 +167,40 @@ services:
       - "4443:4443"
     volumes:
       - test_gcs_data:/data
+  # test_dackup builds dackup and runs its full test suite (unit +
+  # //go:build integration) against pinned borg/kopia binaries inside
+  # test/Dockerfile, instead of on the host. network_mode: host (Linux
+  # only, matching this project's CI/dev targets) makes it reach the
+  # emulator services above the same way the host-executed
+  # `make test-integration` does — through their published localhost
+  # ports — without changing any of the integration tests' hardcoded
+  # "localhost:<port>" config. It's gated behind the "docker-tests"
+  # profile so a plain `docker compose up -d` (used by the host-executed
+  # `make test-integration`) doesn't also try to build and run it; see
+  # `make test-integration-docker`.
+  test_dackup:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile
+    container_name: test_dackup
+    network_mode: "host"
+    profiles: ["docker-tests"]
+    # Kept in sync with THRESHOLD in .github/workflows/test.yml's "test"
+    # job — both gate the same coverage number the same way, just for the
+    # unit-only vs. full (unit + integration) suite respectively.
+    environment:
+      - COVERAGE_THRESHOLD=80
+    depends_on:
+      test_minio_init:
+        condition: service_completed_successfully
+      test_azurite_init:
+        condition: service_completed_successfully
+      test_gcs:
+        condition: service_started
+      test_sftp:
+        condition: service_started
+      test_webdav:
+        condition: service_started
 
 volumes:
   test_data:

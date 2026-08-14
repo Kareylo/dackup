@@ -161,6 +161,58 @@ func withRestoreDirs(t *testing.T, srcDir string, dstDir string) {
 	})
 }
 
+func TestNewCommandService_BuildsServiceWithDependencies(t *testing.T) {
+	service := newCommandService()
+
+	if service.fs == nil {
+		t.Fatal("expected fs to be set")
+	}
+
+	if service.runner == nil {
+		t.Fatal("expected runner to be set")
+	}
+
+	if service.logger == nil {
+		t.Fatal("expected logger to be set")
+	}
+
+	if service.transfer.Direction != shared.TransferRestore {
+		t.Fatalf("expected transfer direction %v, got %v", shared.TransferRestore, service.transfer.Direction)
+	}
+}
+
+func TestRunRestore_ReturnsErrorForMissingConfigFile(t *testing.T) {
+	original := restoreConfigFile
+	defer func() { restoreConfigFile = original }()
+	restoreConfigFile = filepath.Join(t.TempDir(), "missing.json")
+
+	if err := runRestore(nil, false, false); err == nil {
+		t.Fatal("expected an error for a missing config file")
+	}
+}
+
+func TestRunRestore_DelegatesToRunRestoreWithService(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+
+	config := shared.DackupConfig{User: "owner", Group: "group"}
+	if err := shared.WriteDackupConfig(configPath, config, nil); err != nil {
+		t.Fatalf("failed to seed config: %v", err)
+	}
+
+	originalConfigPath := restoreConfigFile
+	defer func() { restoreConfigFile = originalConfigPath }()
+	restoreConfigFile = configPath
+
+	// Point at nonexistent src/dst dirs so PreflightChecks fails fast and
+	// deterministically, without ever touching docker/rsync/chown.
+	withRestoreDirs(t, filepath.Join(dir, "does-not-exist-src"), filepath.Join(dir, "does-not-exist-dst"))
+
+	if err := runRestore(nil, true, true); err == nil {
+		t.Fatal("expected an error from the underlying preflight check")
+	}
+}
+
 func TestRunRestoreWithService_HappyPath(t *testing.T) {
 	fixture := newTestOrchestrationFixture(t, map[string]bool{"a": true}, nil)
 	withRestoreDirs(t, fixture.srcDir, fixture.dstDir)

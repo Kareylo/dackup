@@ -89,7 +89,8 @@ The project is organized around top-level Cobra commands:
 │ │ │ └── defaultbackend_test.go
 │ │ ├── borg/               # first concrete backend
 │ │ │ ├── borg.go
-│ │ │ └── borg_test.go
+│ │ │ ├── borg_test.go
+│ │ │ └── integration_borg_test.go  # //go:build integration, real borg CLI
 │ │ ├── kopia/               # second concrete backend
 │ │ │ ├── kopia.go            # Config + consts
 │ │ │ ├── backend.go          # Backend/GroupedBackend methods
@@ -523,6 +524,32 @@ Every CLI flag `internal/backend/kopia/storage/*` sends to `kopia` was verified 
 
 - **azure** (`storage/azure`): `--storage-domain` overrides the domain in an otherwise virtual-hosted-style URL, but Azurite serves path-style URLs instead — this may not actually reach Azurite even though the flag itself is real.
 - **gcs** (`storage/gcs`): kopia documents no endpoint-override flag for GCS; `EmulatorHost` sets `STORAGE_EMULATOR_HOST`, a convention Google's own client libraries respect, betting kopia's GCS backend uses one under the hood — unconfirmed.
+
+### Borg integration tests
+
+`internal/backend/borg/integration_borg_test.go` drives the real `borg` CLI against local `t.TempDir()` repositories, behind the same `//go:build integration` tag as Kopia's storage tests. Unlike Kopia, Borg only ever talks to a local repository directory (no remote storage type), so this needs no `docker compose` container — just the `borg` binary on PATH:
+
+```bash
+go test -tags=integration ./internal/backend/borg/...
+```
+
+It's also picked up by `make test-integration` (which does start the Kopia storage emulators first, unconditionally — there's no way to run only Borg's tests through that target without also requiring Docker; use the `go test` command above directly if Docker isn't available but `borg` is). Every test skips (not fails) if the `borg` binary isn't on PATH.
+
+Unlike Kopia's fixtures, this needs no `test/config.borg.json`/`test/secret.key` entry: Borg has no remote credentials to keep portable across machines, so each test that needs an encrypted repository generates its own passphrase and a throwaway `AESFileSecretStore` key under a fresh `t.TempDir()` rather than reading a committed fixture. Covers: unencrypted (`encryption: "none"`) and encrypted (`repokey`) round trips, the `compression` flag, `BackupGroups`/`RestoreGroups` (one archive per container group plus the global mirror), and the graceful no-op when restoring from a repository that was never backed up to.
+
+### Dockerized integration tests
+
+Both suites above require `borg`/`kopia` on `PATH`, which a contributor's machine or a CI runner may not have — and even when present, nothing pins their version (a real problem: this repo's own dev environment had a `kopia` binary with no reproducible version string at all). `test/Dockerfile` builds dackup and runs the full suite (`go test -tags=integration -cover ./...`) inside an image with `borgbackup` (via apt, unpinned — same as the Makefile's own `deps-install`) and a specific pinned `kopia` release (`ARG KOPIA_VERSION`, installed from its GitHub release `.deb`, not Debian's apt repos, which don't package it).
+
+It's wired in as the `test_dackup` service in `test/compose.yml`, run via:
+
+```bash
+make test-integration-docker
+```
+
+which starts the same emulator containers as `make test-integration`, waits on the same init containers, then builds and runs `test_dackup` instead of `go test` on the host. `test_dackup` uses `network_mode: host` (Linux only, matching this project's dev/CI targets) specifically so it reaches the emulator containers through their published `localhost:<port>` addresses exactly like the host-executed path does — every integration test's config (`test/config.<type>.json`) and `RequireReachable` call hardcodes `localhost`, and none of that needed to change to make this work. It's gated behind Compose's `docker-tests` profile so a plain `docker compose -f test/compose.yml up -d` (what `make test-integration` itself runs first) doesn't also try to build and start it.
+
+The host-executed `make test-integration` is left in place rather than replaced — a contributor who already has `borg`/`kopia` installed locally doesn't need a Docker build step, and Docker's `network_mode: host` doesn't work the same way on non-Linux Docker Desktop hosts.
 
 ## Compatibility Wrappers
 
