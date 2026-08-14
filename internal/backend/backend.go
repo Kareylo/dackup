@@ -47,3 +47,15 @@ type GroupedBackend interface {
 	BackupGroups(stagingDir string, groups []shared.BackendGroup) error
 	RestoreGroups(stagingDir string, groups []shared.BackendGroup) error
 }
+
+// BinaryChecker is an optional interface a Backend can implement so callers
+// can verify its CLI binary is on PATH during preflight, before any
+// containers are stopped — otherwise a missing borg/kopia binary is only
+// discovered after backup's stop/stage/restart sequence has already run
+// (Backend.Backup is the last step) or restore's has already been staged
+// for it (Backend.Restore is the first step, but still after preflight). A
+// Backend that never shells out (the default no-op backend) just doesn't
+// implement this and is skipped.
+type BinaryChecker interface {
+	BinaryName() string
+}

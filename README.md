@@ -352,6 +352,8 @@ Build locally:
 go build -o build/dackup .
 ```
 
+`test/secret.key` and `test/config.*.json` are fixtures for the Kopia storage integration tests (local MinIO/Azurite/etc. emulators only, no real credentials) — it is not a template for the real `~/.config/dackup/secret.key`, and should never be copied into an actual deployment.
+
 ## Safety notes
 
 - Run backup and restore as a user with permission to manage the configured Docker containers and to `chown` files to the configured `user`/`group` — often root, but no longer enforced by dackup itself.

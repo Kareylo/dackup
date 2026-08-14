@@ -149,6 +149,10 @@ func runRestoreWithService(
 		return err
 	}
 
+	if err := checkBackendBinary(restoreBackend, service.runner); err != nil {
+		return err
+	}
+
 	if groupedBackend, ok := restoreBackend.(backend.GroupedBackend); ok {
 		groups := shared.BackendGroupsFromContainerGroups(shared.ContainerGroups(configs))
 		if err := groupedBackend.RestoreGroups(restoreSrcDir, groups); err != nil {
@@ -206,6 +210,25 @@ func resolveBackend(service commandService, config shared.DackupConfig) (backend
 	}
 
 	return factory.GetBackend(config.Backend, config.BackendSettings)
+}
+
+// checkBackendBinary verifies the resolved backend's CLI binary is on PATH,
+// if it has one (see backend.BinaryChecker) — before Backend.Restore() runs
+// (the first real step of restore) or any containers are stopped, rather
+// than discovering a missing borg/kopia binary partway through.
+func checkBackendBinary(resolvedBackend backend.Backend, runner shared.CommandRunner) error {
+	binaryChecker, ok := resolvedBackend.(backend.BinaryChecker)
+	if !ok {
+		return nil
+	}
+
+	binaryName := binaryChecker.BinaryName()
+
+	if _, err := runner.LookPath(binaryName); err != nil {
+		return fmt.Errorf("backend %q binary %q not found on PATH", resolvedBackend.Name(), binaryName)
+	}
+
+	return nil
 }
 
 func applyRestoreDirectoryConfig(config shared.DackupConfig, srcDirFlagChanged bool, dstDirFlagChanged bool) {

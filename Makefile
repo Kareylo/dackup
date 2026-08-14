@@ -12,7 +12,8 @@ LDFLAGS ?= -s -w -X dackup/cmd/version.Version=$(VERSION)
 .PHONY: help
 help:
 	@echo "Available targets:"
-	@echo "  make deps                Install required dependencies when possible"
+	@echo "  make deps                Check required dependencies are installed"
+	@echo "  make deps-install        Install missing dependencies (uses sudo)"
 	@echo "  make build               Build $(APP_NAME)"
 	@echo "  make test                Run tests"
 	@echo "  make test-integration    Start test/compose.yml and run kopia storage integration tests"
@@ -23,32 +24,56 @@ help:
 
 .PHONY: deps
 deps:
+	@echo "Checking dependencies..."
+	@if command -v go >/dev/null 2>&1; then \
+		echo "Go is already installed: $$(go version)"; \
+	else \
+		echo "Go is not installed."; \
+		echo "Run 'make deps-install' to install it (uses sudo), or install Go manually."; \
+		exit 1; \
+	fi
+	@if command -v rsync >/dev/null 2>&1; then \
+		echo "rsync is installed."; \
+	else \
+		echo "WARNING: rsync is not installed. Run 'make deps-install' or install it manually."; \
+	fi
+	@if command -v docker >/dev/null 2>&1; then \
+		echo "Docker CLI is installed."; \
+	else \
+		echo "WARNING: Docker CLI is not installed."; \
+		echo "Install Docker manually for backup/restore commands to work."; \
+	fi
+	@echo "Downloading Go module dependencies..."
+	$(GO) mod download
+
+.PHONY: deps-install
+deps-install:
 	@echo "Installing dependencies..."
 	@if command -v go >/dev/null 2>&1; then \
 		echo "Go is already installed: $$(go version)"; \
 	else \
 		echo "Go is not installed."; \
 		if command -v apt-get >/dev/null 2>&1; then \
-			echo "Using apt-get..."; \
+			echo "Using apt-get (sudo)..."; \
 			sudo apt-get update; \
 			sudo apt-get install -y golang-go rsync; \
 		elif command -v dnf >/dev/null 2>&1; then \
-			echo "Using dnf..."; \
+			echo "Using dnf (sudo)..."; \
 			sudo dnf install -y golang rsync; \
 		elif command -v yum >/dev/null 2>&1; then \
-			echo "Using yum..."; \
+			echo "Using yum (sudo)..."; \
 			sudo yum install -y golang rsync; \
 		elif command -v pacman >/dev/null 2>&1; then \
-			echo "Using pacman..."; \
+			echo "Using pacman (sudo)..."; \
 			sudo pacman -Sy --needed go rsync; \
 		elif command -v zypper >/dev/null 2>&1; then \
-			echo "Using zypper..."; \
+			echo "Using zypper (sudo)..."; \
 			sudo zypper install -y go rsync; \
 		elif command -v apk >/dev/null 2>&1; then \
-			echo "Using apk..."; \
+			echo "Using apk (sudo)..."; \
 			sudo apk add go rsync; \
 		elif command -v pkg >/dev/null 2>&1; then \
-			echo "Using pkg..."; \
+			echo "Using pkg (sudo)..."; \
 			sudo pkg install -y go rsync; \
 		elif command -v brew >/dev/null 2>&1; then \
 			echo "Using Homebrew..."; \
@@ -70,8 +95,6 @@ deps:
 		echo "WARNING: Docker CLI is not installed."; \
 		echo "Install Docker manually for backup/restore commands to work."; \
 	fi
-	@echo "Downloading Go module dependencies..."
-	$(GO) mod download
 
 .PHONY: build
 build: deps

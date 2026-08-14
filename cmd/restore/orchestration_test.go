@@ -1,6 +1,7 @@
 package restore
 
 import (
+	"dackup/internal/backend"
 	"dackup/internal/shared"
 	"fmt"
 	"os"
@@ -9,6 +10,18 @@ import (
 	"strings"
 	"testing"
 )
+
+// fakeBinaryBackend implements both backend.Backend and the optional
+// backend.BinaryChecker interface, so tests can exercise checkBackendBinary
+// without needing a real borg/kopia config.
+type fakeBinaryBackend struct {
+	binaryName string
+}
+
+func (fakeBinaryBackend) Name() string                    { return "fake" }
+func (fakeBinaryBackend) Backup(stagingDir string) error  { return nil }
+func (fakeBinaryBackend) Restore(stagingDir string) error { return nil }
+func (fb fakeBinaryBackend) BinaryName() string           { return fb.binaryName }
 
 type fakeOrchestrationLogger struct {
 	lines []string
@@ -22,8 +35,9 @@ func (logger *fakeOrchestrationLogger) Log(level string, message string) {
 // spawn real subprocesses. Output() answers docker ps queries (container
 // state); Run() answers docker stop/start plus rsync/chown.
 type fakeOrchestrationRunner struct {
-	running  map[string]bool
-	stopErrs map[string]error
+	running      map[string]bool
+	stopErrs     map[string]error
+	lookPathErrs map[string]error
 
 	stopped  []string
 	started  []string
@@ -32,6 +46,9 @@ type fakeOrchestrationRunner struct {
 }
 
 func (runner *fakeOrchestrationRunner) LookPath(file string) (string, error) {
+	if err, ok := runner.lookPathErrs[file]; ok {
+		return "", err
+	}
 	return file, nil
 }
 
@@ -249,5 +266,65 @@ func TestRunRestoreWithService_StopFailureAbortsAndRestartsAlreadyStoppedContain
 
 	if !reflect.DeepEqual(fixture.runner.started, []string{"a"}) {
 		t.Fatalf("expected already-stopped container a to be restarted despite the abort, got %#v", fixture.runner.started)
+	}
+}
+
+func TestCheckBackendBinary_MissingBinaryReturnsError(t *testing.T) {
+	runner := &fakeOrchestrationRunner{lookPathErrs: map[string]error{"borg": fmt.Errorf("not found")}}
+
+	err := checkBackendBinary(fakeBinaryBackend{binaryName: "borg"}, runner)
+	if err == nil {
+		t.Fatal("expected an error when the backend binary is not on PATH")
+	}
+}
+
+func TestCheckBackendBinary_BackendWithoutBinaryCheckerIsSkipped(t *testing.T) {
+	runner := &fakeOrchestrationRunner{}
+
+	resolvedBackend, err := (backend.Factory{}).GetBackend("", nil)
+	if err != nil {
+		t.Fatalf("failed to resolve default backend: %v", err)
+	}
+
+	if err := checkBackendBinary(resolvedBackend, runner); err != nil {
+		t.Fatalf("expected no error for a backend without BinaryChecker, got %v", err)
+	}
+}
+
+func TestRunRestoreWithService_MissingBackendBinaryFailsBeforeTouchingContainers(t *testing.T) {
+	fixture := newTestOrchestrationFixture(t, map[string]bool{"a": true}, nil)
+	withRestoreDirs(t, fixture.srcDir, fixture.dstDir)
+	fixture.runner.lookPathErrs = map[string]error{"borg": fmt.Errorf("not found")}
+
+	if err := os.MkdirAll(filepath.Join(fixture.srcDir, "data"), 0o755); err != nil {
+		t.Fatalf("failed to create configured path: %v", err)
+	}
+
+	effectiveConfigPath := filepath.Join(fixture.dstDir, "config.json")
+	touchFile(t, effectiveConfigPath)
+
+	backendDir := t.TempDir()
+	config := shared.DackupConfig{
+		User:            "restoreuser",
+		Group:           "restoregroup",
+		Backend:         "borg",
+		BackendDir:      backendDir,
+		BackendSettings: []byte(`{"encryption":"none"}`),
+		Containers: []shared.ContainerConfig{
+			{Container: "a", ToStop: true, Paths: []string{"data"}},
+		},
+	}
+
+	err := runRestoreWithService(fixture.service, config, effectiveConfigPath, nil)
+	if err == nil {
+		t.Fatal("expected an error when the configured backend's binary is missing")
+	}
+
+	if !strings.Contains(err.Error(), "borg") {
+		t.Fatalf("expected error to mention the missing borg binary, got %q", err.Error())
+	}
+
+	if len(fixture.runner.stopped) != 0 {
+		t.Fatalf("expected no containers to be stopped when the backend binary is missing, got %#v", fixture.runner.stopped)
 	}
 }

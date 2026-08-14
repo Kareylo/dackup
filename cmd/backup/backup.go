@@ -148,6 +148,10 @@ func runBackupWithService(
 		return err
 	}
 
+	if err := checkBackendBinary(backupBackend, service.runner); err != nil {
+		return err
+	}
+
 	containersToStop := containersToStopFromConfig(configs)
 
 	lifecycleService := shared.ContainerLifecycleService{
@@ -212,6 +216,25 @@ func resolveBackend(service commandService, config shared.DackupConfig) (backend
 	}
 
 	return factory.GetBackend(config.Backend, config.BackendSettings)
+}
+
+// checkBackendBinary verifies the resolved backend's CLI binary is on PATH,
+// if it has one (see backend.BinaryChecker) — before any containers are
+// stopped, rather than letting a missing borg/kopia binary surface only
+// when Backend.Backup() runs as the very last step.
+func checkBackendBinary(resolvedBackend backend.Backend, runner shared.CommandRunner) error {
+	binaryChecker, ok := resolvedBackend.(backend.BinaryChecker)
+	if !ok {
+		return nil
+	}
+
+	binaryName := binaryChecker.BinaryName()
+
+	if _, err := runner.LookPath(binaryName); err != nil {
+		return fmt.Errorf("backend %q binary %q not found on PATH", resolvedBackend.Name(), binaryName)
+	}
+
+	return nil
 }
 
 func applyBackupDirectoryConfig(config shared.DackupConfig, srcDirFlagChanged bool, dstDirFlagChanged bool) {
