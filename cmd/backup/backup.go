@@ -3,7 +3,7 @@ package backup
 import (
 	"dackup/internal/backend"
 	"dackup/internal/shared"
-	"path/filepath"
+	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -112,8 +112,18 @@ func runBackup(requestedContainers []string, srcDirFlagChanged bool, dstDirFlagC
 
 	applyBackupDirectoryConfig(config, srcDirFlagChanged, dstDirFlagChanged)
 
-	service := newCommandService()
+	return runBackupWithService(newCommandService(), config, effectiveConfigPath, requestedContainers)
+}
 
+// runBackupWithService is runBackup's testable core: it takes an already-built
+// commandService instead of constructing one via newCommandService(), so
+// tests can inject fakes for fs/runner/logger instead of hitting the OS.
+func runBackupWithService(
+	service commandService,
+	config shared.DackupConfig,
+	effectiveConfigPath string,
+	requestedContainers []string,
+) error {
 	backupBackend, err := resolveBackend(service, config)
 	if err != nil {
 		return err
@@ -124,7 +134,17 @@ func runBackup(requestedContainers []string, srcDirFlagChanged bool, dstDirFlagC
 		return err
 	}
 
-	if err := preflightChecks(effectiveConfigPath, config, configs); err != nil {
+	if err := shared.PreflightChecks(
+		"backup",
+		effectiveConfigPath,
+		config,
+		configs,
+		backupSrcDir,
+		backupDstDir,
+		service.paths,
+		service.fs,
+		service.runner,
+	); err != nil {
 		return err
 	}
 
@@ -141,6 +161,9 @@ func runBackup(requestedContainers []string, srcDirFlagChanged bool, dstDirFlagC
 
 	stoppedContainers, err := lifecycleService.StopRunningContainers(containersToStop, "backup")
 	if err != nil {
+		if restartErr := lifecycleService.StartStoppedContainers(stoppedContainers, "backup"); restartErr != nil {
+			return fmt.Errorf("%w (additionally failed to restart already-stopped containers: %v)", err, restartErr)
+		}
 		return err
 	}
 
@@ -213,49 +236,12 @@ func selectContainerAndContainedForBackup(
 	shared.SelectContainerAndContained(containerName, configByContainer, selected)
 }
 
-func preflightChecks(effectiveConfigPath string, config shared.DackupConfig, configs []shared.ContainerConfig) error {
-	service := newCommandService()
-	return shared.PreflightChecks(
-		"backup",
-		effectiveConfigPath,
-		config,
-		configs,
-		backupSrcDir,
-		backupDstDir,
-		service.paths,
-		service.fs,
-		service.runner,
-	)
-}
-
 func containersToStopFromConfig(configs []shared.ContainerConfig) []string {
 	return shared.ContainersToStopFromConfig(configs)
 }
 
 func addContainer(container string, seen map[string]bool, containers *[]string) {
 	shared.AddUniqueContainer(container, seen, containers)
-}
-
-func runConfiguredBackups(configs []shared.ContainerConfig) error {
-	return newCommandService().transfer.Run(configs)
-}
-
-func backupSinglePath(container string, srcPath string, dstPath string) error {
-	return newCommandService().transfer.SinglePath(container, srcPath, dstPath)
-}
-
-func fixBackupOwnership(owner string, group string) error {
-	return newCommandService().transfer.FixBackupOwnership(owner, group)
-}
-
-func sourcePath(configuredPath string) string {
-	cleanPath := cleanConfiguredPath(configuredPath)
-	return filepath.Join(backupSrcDir, cleanPath)
-}
-
-func destinationPath(configuredPath string) string {
-	cleanPath := cleanConfiguredPath(configuredPath)
-	return filepath.Join(backupDstDir, cleanPath)
 }
 
 func cleanConfiguredPath(configuredPath string) string {

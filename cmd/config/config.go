@@ -125,7 +125,11 @@ func newCommandService(reader *bufio.Reader) commandService {
 }
 
 func runConfigInit() error {
-	service := newCommandService(bufio.NewReader(os.Stdin))
+	return runConfigInitWithReader(bufio.NewReader(os.Stdin))
+}
+
+func runConfigInitWithReader(reader *bufio.Reader) error {
+	service := newCommandService(reader)
 
 	if shared.FileExists(configFilePath) {
 		overwrite, err := service.prompt.Bool(
@@ -247,7 +251,11 @@ func (service commandService) createConfigWithCustomContainersFile(
 }
 
 func runConfigAddContainer() error {
-	service := newCommandService(bufio.NewReader(os.Stdin))
+	return runConfigAddContainerWithReader(bufio.NewReader(os.Stdin))
+}
+
+func runConfigAddContainerWithReader(reader *bufio.Reader) error {
+	service := newCommandService(reader)
 
 	effectiveConfigPath, err := shared.EffectiveContainersConfigPath(configFilePath)
 	if err != nil {
@@ -281,7 +289,11 @@ func runConfigAddContainer() error {
 }
 
 func runConfigUpdateContainer() error {
-	service := newCommandService(bufio.NewReader(os.Stdin))
+	return runConfigUpdateContainerWithReader(bufio.NewReader(os.Stdin))
+}
+
+func runConfigUpdateContainerWithReader(reader *bufio.Reader) error {
+	service := newCommandService(reader)
 
 	effectiveConfigPath, err := shared.EffectiveContainersConfigPath(configFilePath)
 	if err != nil {
@@ -335,7 +347,11 @@ func runConfigUpdateContainer() error {
 }
 
 func runConfigRemoveContainer() error {
-	service := newCommandService(bufio.NewReader(os.Stdin))
+	return runConfigRemoveContainerWithReader(bufio.NewReader(os.Stdin))
+}
+
+func runConfigRemoveContainerWithReader(reader *bufio.Reader) error {
+	service := newCommandService(reader)
 
 	effectiveConfigPath, err := shared.EffectiveContainersConfigPath(configFilePath)
 	if err != nil {
@@ -433,7 +449,11 @@ func containsString(values []string, target string) bool {
 }
 
 func runConfigUseFile(customPath string) error {
-	service := newCommandService(bufio.NewReader(os.Stdin))
+	return runConfigUseFileWithReader(bufio.NewReader(os.Stdin), customPath)
+}
+
+func runConfigUseFileWithReader(reader *bufio.Reader, customPath string) error {
+	service := newCommandService(reader)
 
 	customPath = strings.TrimSpace(customPath)
 	if customPath == "" {
@@ -501,230 +521,6 @@ func runConfigUseFile(customPath string) error {
 	fmt.Printf("This setting was written to: %s\n", configFilePath)
 
 	return nil
-}
-
-func (service commandService) askContainers() ([]shared.ContainerConfig, error) {
-	var configs []shared.ContainerConfig
-
-	fmt.Println("Creating dackup containers configuration.")
-	fmt.Println("You will now be asked to add containers.")
-	fmt.Println()
-
-	for {
-		config, err := service.askContainerConfig()
-		if err != nil {
-			return nil, err
-		}
-
-		configs = append(configs, config)
-
-		addAnother, err := service.prompt.Bool("Add another container?", true)
-		if err != nil {
-			return nil, err
-		}
-
-		if !addAnother {
-			break
-		}
-
-		fmt.Println()
-	}
-
-	return configs, nil
-}
-
-func askContainers(reader *bufio.Reader) ([]shared.ContainerConfig, error) {
-	return newCommandService(reader).askContainers()
-}
-
-func (service commandService) askContainerConfig() (shared.ContainerConfig, error) {
-	container, err := service.prompt.RequiredString("Container name")
-	if err != nil {
-		return shared.ContainerConfig{}, err
-	}
-
-	toStop, err := service.prompt.Bool("Stop this container before backup?", false)
-	if err != nil {
-		return shared.ContainerConfig{}, err
-	}
-
-	paths, err := service.prompt.StringList("Backup paths, separated by commas. Leave empty if none")
-	if err != nil {
-		return shared.ContainerConfig{}, err
-	}
-
-	contains, err := service.prompt.StringList("Contained/dependent containers, separated by commas. Leave empty if none")
-	if err != nil {
-		return shared.ContainerConfig{}, err
-	}
-
-	config := shared.ContainerConfig{
-		Container: container,
-		ToStop:    toStop,
-	}
-
-	if len(paths) > 0 {
-		config.Paths = paths
-	}
-
-	if len(contains) > 0 {
-		config.Contains = contains
-	}
-
-	return config, nil
-}
-
-func askContainerConfig(reader *bufio.Reader) (shared.ContainerConfig, error) {
-	return newCommandService(reader).askContainerConfig()
-}
-
-func (service commandService) askUpdatedContainerConfig(
-	currentConfig shared.ContainerConfig,
-) (shared.ContainerConfig, error) {
-	fmt.Printf("Updating container %q. Press Enter to keep the current value.\n", currentConfig.Container)
-	fmt.Println()
-
-	container, err := service.prompt.StringWithDefault("Container name", currentConfig.Container)
-	if err != nil {
-		return shared.ContainerConfig{}, err
-	}
-
-	toStop, err := service.prompt.Bool(
-		fmt.Sprintf("Stop this container before backup? Current value: %t", currentConfig.ToStop),
-		currentConfig.ToStop,
-	)
-	if err != nil {
-		return shared.ContainerConfig{}, err
-	}
-
-	paths, err := service.prompt.StringListWithDefault("Backup paths, separated by commas", currentConfig.Paths)
-	if err != nil {
-		return shared.ContainerConfig{}, err
-	}
-
-	contains, err := service.prompt.StringListWithDefault("Contained/dependent containers, separated by commas", currentConfig.Contains)
-	if err != nil {
-		return shared.ContainerConfig{}, err
-	}
-
-	updatedConfig := shared.ContainerConfig{
-		Container: container,
-		ToStop:    toStop,
-	}
-
-	if len(paths) > 0 {
-		updatedConfig.Paths = paths
-	}
-
-	if len(contains) > 0 {
-		updatedConfig.Contains = contains
-	}
-
-	return updatedConfig, nil
-}
-
-func askUpdatedContainerConfig(
-	reader *bufio.Reader,
-	currentConfig shared.ContainerConfig,
-) (shared.ContainerConfig, error) {
-	return newCommandService(reader).askUpdatedContainerConfig(currentConfig)
-}
-
-func askRequiredString(reader *bufio.Reader, label string) (string, error) {
-	return shared.NewPromptService(reader).RequiredString(label)
-}
-
-func askString(reader *bufio.Reader, label string) (string, error) {
-	return shared.NewPromptService(reader).String(label)
-}
-
-func askStringWithDefault(reader *bufio.Reader, label string, defaultValue string) (string, error) {
-	return shared.NewPromptService(reader).StringWithDefault(label, defaultValue)
-}
-
-func askBool(reader *bufio.Reader, label string, defaultValue bool) (bool, error) {
-	return shared.NewPromptService(reader).Bool(label, defaultValue)
-}
-
-func askStringList(reader *bufio.Reader, label string) ([]string, error) {
-	return shared.NewPromptService(reader).StringList(label)
-}
-
-func askStringListWithDefault(reader *bufio.Reader, label string, defaultValues []string) ([]string, error) {
-	return shared.NewPromptService(reader).StringListWithDefault(label, defaultValues)
-}
-
-func parseStringList(value string) []string {
-	return shared.ParseStringList(value)
-}
-
-func (service commandService) readExistingContainerConfigs(path string) ([]shared.ContainerConfig, error) {
-	if !shared.FileExists(path) {
-		create, err := service.askCreateMissingConfig(path)
-		if err != nil {
-			return nil, err
-		}
-
-		if !create {
-			return nil, fmt.Errorf("configuration file does not exist: %s", path)
-		}
-
-		if err := shared.WriteContainerConfigsToPath(path, []shared.ContainerConfig{}, options); err != nil {
-			return nil, err
-		}
-
-		return []shared.ContainerConfig{}, nil
-	}
-
-	return shared.ReadContainerConfigsFromPath(path)
-}
-
-func readExistingContainerConfigs(path string) ([]shared.ContainerConfig, error) {
-	return newCommandService(bufio.NewReader(os.Stdin)).readExistingContainerConfigs(path)
-}
-
-func (service commandService) askCreateMissingConfig(path string) (bool, error) {
-	return service.prompt.Bool(fmt.Sprintf("Configuration file does not exist at %s. Create it?", path), true)
-}
-
-func askCreateMissingConfig(path string) (bool, error) {
-	return newCommandService(bufio.NewReader(os.Stdin)).askCreateMissingConfig(path)
-}
-
-func printContainers(configs []shared.ContainerConfig) {
-	fmt.Println("Existing containers:")
-	fmt.Println()
-
-	for index, config := range configs {
-		fmt.Printf("%d. %s\n", index+1, config.Container)
-		fmt.Printf("   Stop before backup: %t\n", config.ToStop)
-
-		if len(config.Paths) > 0 {
-			fmt.Printf("   Paths: %s\n", strings.Join(config.Paths, ", "))
-		} else {
-			fmt.Println("   Paths: none")
-		}
-
-		if len(config.Contains) > 0 {
-			fmt.Printf("   Contains: %s\n", strings.Join(config.Contains, ", "))
-		} else {
-			fmt.Println("   Contains: none")
-		}
-
-		fmt.Println()
-	}
-}
-
-func findContainerIndex(configs []shared.ContainerConfig, containerName string) int {
-	containerName = strings.TrimSpace(containerName)
-
-	for index, config := range configs {
-		if config.Container == containerName {
-			return index
-		}
-	}
-
-	return -1
 }
 
 func normalizeConfigPath(path string) (string, error) {

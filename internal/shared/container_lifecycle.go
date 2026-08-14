@@ -1,6 +1,9 @@
 package shared
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // ContainerLifecycleService stops and restarts Docker containers around a
 // backup or restore, restarting only the ones it actually stopped.
@@ -24,11 +27,13 @@ func (service ContainerLifecycleService) StopRunningContainers(containers []stri
 	}
 
 	var stoppedContainers []string
+	var failedContainers []string
 
 	for _, container := range containers {
 		running, err := service.Docker.ContainerRunning(container)
 		if err != nil {
 			service.Logger.Log("ERROR", fmt.Sprintf("Failed to inspect container %s: %v", container, err))
+			failedContainers = append(failedContainers, container)
 			continue
 		}
 
@@ -46,12 +51,20 @@ func (service ContainerLifecycleService) StopRunningContainers(containers []stri
 		}
 
 		if err := service.Runner.Run("docker", "stop", container); err != nil {
-			service.Logger.Log("ERROR", fmt.Sprintf("Failed to stop container %s; continuing", container))
+			service.Logger.Log("ERROR", fmt.Sprintf("Failed to stop container %s: %v", container, err))
+			failedContainers = append(failedContainers, container)
 			continue
 		}
 
 		service.Logger.Log("INFO", fmt.Sprintf("Container %s stopped", container))
 		stoppedContainers = append(stoppedContainers, container)
+	}
+
+	if len(failedContainers) > 0 {
+		return stoppedContainers, fmt.Errorf(
+			"failed to stop or inspect container(s), aborting: %s",
+			strings.Join(failedContainers, ", "),
+		)
 	}
 
 	return stoppedContainers, nil

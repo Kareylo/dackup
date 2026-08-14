@@ -3,7 +3,7 @@ package restore
 import (
 	"dackup/internal/backend"
 	"dackup/internal/shared"
-	"path/filepath"
+	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -112,8 +112,19 @@ func runRestore(requestedContainers []string, srcDirFlagChanged bool, dstDirFlag
 
 	applyRestoreDirectoryConfig(config, srcDirFlagChanged, dstDirFlagChanged)
 
-	service := newCommandService()
+	return runRestoreWithService(newCommandService(), config, effectiveConfigPath, requestedContainers)
+}
 
+// runRestoreWithService is runRestore's testable core: it takes an
+// already-built commandService instead of constructing one via
+// newCommandService(), so tests can inject fakes for fs/runner/logger
+// instead of hitting the OS.
+func runRestoreWithService(
+	service commandService,
+	config shared.DackupConfig,
+	effectiveConfigPath string,
+	requestedContainers []string,
+) error {
 	restoreBackend, err := resolveBackend(service, config)
 	if err != nil {
 		return err
@@ -124,7 +135,17 @@ func runRestore(requestedContainers []string, srcDirFlagChanged bool, dstDirFlag
 		return err
 	}
 
-	if err := restorePreflightChecks(effectiveConfigPath, config, configs); err != nil {
+	if err := shared.PreflightChecks(
+		"restore",
+		effectiveConfigPath,
+		config,
+		configs,
+		restoreSrcDir,
+		restoreDstDir,
+		service.paths,
+		service.fs,
+		service.runner,
+	); err != nil {
 		return err
 	}
 
@@ -150,6 +171,9 @@ func runRestore(requestedContainers []string, srcDirFlagChanged bool, dstDirFlag
 
 	stoppedContainers, err := lifecycleService.StopRunningContainers(containersToStop, "restore")
 	if err != nil {
+		if restartErr := lifecycleService.StartStoppedContainers(stoppedContainers, "restore"); restartErr != nil {
+			return fmt.Errorf("%w (additionally failed to restart already-stopped containers: %v)", err, restartErr)
+		}
 		return err
 	}
 
@@ -194,25 +218,6 @@ func applyRestoreDirectoryConfig(config shared.DackupConfig, srcDirFlagChanged b
 	}
 }
 
-func restorePreflightChecks(
-	effectiveConfigPath string,
-	config shared.DackupConfig,
-	configs []shared.ContainerConfig,
-) error {
-	service := newCommandService()
-	return shared.PreflightChecks(
-		"restore",
-		effectiveConfigPath,
-		config,
-		configs,
-		restoreSrcDir,
-		restoreDstDir,
-		service.paths,
-		service.fs,
-		service.runner,
-	)
-}
-
 func filterConfigsForRestore(
 	configs []shared.ContainerConfig,
 	requestedContainers []string,
@@ -236,32 +241,6 @@ func restoreAddContainer(container string, seen map[string]bool, containers *[]s
 	shared.AddUniqueContainer(container, seen, containers)
 }
 
-func runConfiguredRestores(configs []shared.ContainerConfig) error {
-	return newCommandService().transfer.Run(configs)
-}
-
-func restoreSinglePath(container string, srcPath string, dstPath string) error {
-	return newCommandService().transfer.SinglePath(container, srcPath, dstPath)
-}
-
-func fixRestoreOwnership(configs []shared.ContainerConfig, owner string, group string) error {
-	return newCommandService().transfer.FixRestoreOwnership(configs, owner, group)
-}
-
-func restoreSourcePath(configuredPath string) string {
-	cleanPath := restoreCleanConfiguredPath(configuredPath)
-	return filepath.Join(restoreSrcDir, cleanPath)
-}
-
-func restoreDestinationPath(configuredPath string) string {
-	cleanPath := restoreCleanConfiguredPath(configuredPath)
-	return filepath.Join(restoreDstDir, cleanPath)
-}
-
 func restoreCleanConfiguredPath(configuredPath string) string {
 	return shared.CleanConfiguredPath(configuredPath)
-}
-
-func restoreLogMessage(level string, message string) {
-	newCommandService().logger.Log(level, message)
 }
