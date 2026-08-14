@@ -76,12 +76,13 @@ type LoggedCommandRunner struct {
 	Options *Options
 }
 
+// Run always executes name as a real subprocess, redirecting its
+// stdout/stderr to LogFile — unlike Output/LookPath, it never delegates to
+// an injected Runner, because CommandRunner's Run signature has no way to
+// express a custom stdout/stderr writer. A test faking stop/start/rsync/
+// chown calls must construct a bare CommandRunner directly rather than
+// wrapping it in a LoggedCommandRunner.
 func (runner LoggedCommandRunner) Run(name string, args ...string) error {
-	commandRunner := runner.Runner
-	if commandRunner == nil {
-		commandRunner = OSCommandRunner{}
-	}
-
 	fs := runner.FS
 	if fs == nil {
 		fs = OSFileSystem{}

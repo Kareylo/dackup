@@ -52,29 +52,62 @@ The project is organized around top-level Cobra commands:
 .
 ├── cmd/
 │ ├── backend/
-│ │ ├── backend.go
+│ │ ├── backend.go       # create/show/update/remove wiring
+│ │ ├── borg.go           # borg settings prompt
+│ │ ├── kopia.go          # kopia settings prompts, incl. per-storage-type
+│ │ ├── prompts.go
+│ │ ├── print.go
 │ │ └── backend_test.go
 │ ├── backup/
-│ │ ├── backup.go
-│ │ └── backup_test.go
+│ │ ├── backup.go          # runBackup + testable runBackupWithService core
+│ │ ├── backup_test.go
+│ │ └── orchestration_test.go
 │ ├── config/
-│ │ ├── config.go
-│ │ ├── config_helper.go
+│ │ ├── config.go          # wiring + init/add/update/remove/list/use-file handlers
+│ │ ├── prompts.go
+│ │ ├── print.go
+│ │ ├── config_helper.go   # thin shared.* compatibility shim
+│ │ ├── config_test.go
 │ │ ├── config_helper_test.go
-│ │ └── config_test.go
+│ │ └── orchestration_test.go
 │ ├── restore/
-│ │ ├── restore.go
-│ │ └── restore_test.go
+│ │ ├── restore.go         # near-mirror of backup.go, reversed direction (see F015)
+│ │ ├── restore_test.go
+│ │ └── orchestration_test.go
+│ ├── version/
+│ │ ├── version.go
+│ │ └── version_test.go
 │ ├── fixtures_test.go
 │ ├── root.go
 │ └── root_test.go
 ├── internal/
 │ ├── backend/
-│ │ ├── backend.go
+│ │ ├── backend.go        # Backend, GroupedBackend, BinaryChecker interfaces
 │ │ ├── backend_test.go
-│ │ ├── defaultbackend/
+│ │ ├── default/           # no-op Backend (package name defaultbackend)
 │ │ │ ├── defaultbackend.go
 │ │ │ └── defaultbackend_test.go
+│ │ ├── borg/               # first concrete backend
+│ │ │ ├── borg.go
+│ │ │ └── borg_test.go
+│ │ ├── kopia/               # second concrete backend
+│ │ │ ├── kopia.go            # Config + consts
+│ │ │ ├── backend.go          # Backend/GroupedBackend methods
+│ │ │ ├── repository.go       # CLI mechanics per repository
+│ │ │ ├── integration_helpers.go
+│ │ │ ├── kopia_test.go
+│ │ │ └── storage/            # one subpackage per storage type
+│ │ │   ├── provider.go        # storage.Provider interface, Invocation, ObjectPrefix
+│ │ │   ├── filesystem/
+│ │ │   ├── s3/
+│ │ │   ├── sftp/
+│ │ │   ├── b2/
+│ │ │   ├── azure/
+│ │ │   ├── gcs/
+│ │ │   ├── rclone/
+│ │ │   └── webdav/
+│ │ │     # each: <type>.go, <type>_test.go, and (except filesystem/rclone)
+│ │ │     # integration_<type>_test.go behind //go:build integration
 │ │ ├── factory.go
 │ │ ├── factory_test.go
 │ │ ├── registry.go
@@ -83,19 +116,30 @@ The project is organized around top-level Cobra commands:
 │ │ └── settings_test.go
 │ └── shared/
 │   ├── command_runner.go
+│   ├── command_runner_test.go
+│   ├── container_groups.go
+│   ├── backend_groups_test.go
+│   ├── container_groups_test.go
 │   ├── container_lifecycle.go
+│   ├── container_lifecycle_test.go
 │   ├── container_selection.go
 │   ├── docker.go
 │   ├── filesystem.go
 │   ├── logger.go
 │   ├── paths.go
 │   ├── preflight.go
+│   ├── preflight_test.go
 │   ├── prompts.go
+│   ├── secrets.go
+│   ├── secrets_test.go
 │   ├── shared.go
 │   ├── shared_test.go
-│   └── transfer.go
+│   ├── transfer.go
+│   └── transfer_test.go
 └── main.go
 ```
+
+`internal/backend/kopia/storage/<type>/` is listed collapsed above since all seven follow the same shape — see AGENTS.md's "Backend interface" section below for the per-type detail. Everything else is listed exhaustively; regenerate this diagram (`find cmd internal main.go -name '*.go' | sort`) whenever it drifts rather than letting it go stale again.
 
 Top-level command packages should expose constructors:
 
@@ -461,6 +505,8 @@ cmd/root_test.go
 For command package tests, prefer local test helpers instead of importing unexported helpers from another package.
 
 Avoid tests depending on package-private symbols from unrelated packages.
+
+`cmd/backup/orchestration_test.go` and `cmd/restore/orchestration_test.go` each define their own near-identical `fakeOrchestrationRunner`/`fakeOrchestrationLogger`/`fakeBinaryBackend`/`touchFile`/`containerFromFilterArg` — deliberate duplication, following the rule above, not an oversight. `internal/shared/container_lifecycle_test.go` has its own differently-shaped variant of the same runner/logger fake pattern for the same reason. Leave these as separate copies; do not extract a shared test-helper package across `cmd/backup`/`cmd/restore`/`internal/shared` to deduplicate them.
 
 ### Kopia storage integration tests
 
