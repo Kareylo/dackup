@@ -7,6 +7,111 @@ import (
 	"testing"
 )
 
+func TestOSCommandRunner_Run(t *testing.T) {
+	outputPath := filepath.Join(t.TempDir(), "run-output.txt")
+
+	if err := (OSCommandRunner{}).Run("sh", "-c", "echo hi > "+outputPath); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read command output: %v", err)
+	}
+
+	if got := strings.TrimSpace(string(data)); got != "hi" {
+		t.Fatalf("expected output %q, got %q", "hi", got)
+	}
+}
+
+func TestOSCommandRunner_Run_ReturnsErrorForFailingCommand(t *testing.T) {
+	if err := (OSCommandRunner{}).Run("sh", "-c", "exit 1"); err == nil {
+		t.Fatal("expected an error for a failing command")
+	}
+}
+
+func TestOSCommandRunner_Output(t *testing.T) {
+	output, err := (OSCommandRunner{}).Output("sh", "-c", "echo hello")
+	if err != nil {
+		t.Fatalf("Output returned error: %v", err)
+	}
+
+	if got := strings.TrimSpace(string(output)); got != "hello" {
+		t.Fatalf("expected output %q, got %q", "hello", got)
+	}
+}
+
+func TestOSCommandRunner_LookPath_FindsRealBinary(t *testing.T) {
+	if _, err := (OSCommandRunner{}).LookPath("sh"); err != nil {
+		t.Fatalf("LookPath returned error for a binary that should be on PATH: %v", err)
+	}
+}
+
+func TestOSCommandRunner_LookPath_ReturnsErrorForMissingBinary(t *testing.T) {
+	if _, err := (OSCommandRunner{}).LookPath("dackup-nonexistent-binary-xyz"); err == nil {
+		t.Fatal("expected an error for a binary that is not on PATH")
+	}
+}
+
+func TestLoggedCommandRunner_Run_WritesStdoutAndStderrToLogFile(t *testing.T) {
+	logFile := filepath.Join(t.TempDir(), "run.log")
+	runner := LoggedCommandRunner{LogFile: logFile}
+
+	if err := runner.Run("sh", "-c", "echo out; echo err >&2"); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("failed to read log file: %v", err)
+	}
+
+	logged := string(data)
+	if !strings.Contains(logged, "out") || !strings.Contains(logged, "err") {
+		t.Fatalf("expected log file to contain both stdout and stderr, got %q", logged)
+	}
+}
+
+func TestLoggedCommandRunner_Run_VerboseOptionPrintsCommandLine(t *testing.T) {
+	runner := LoggedCommandRunner{
+		LogFile: filepath.Join(t.TempDir(), "run.log"),
+		Options: &Options{Verbose: true},
+	}
+
+	if err := runner.Run("sh", "-c", "true"); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
+func TestLoggedCommandRunner_Run_ReturnsErrorWhenLogFileCannotBeOpened(t *testing.T) {
+	runner := LoggedCommandRunner{LogFile: filepath.Join(t.TempDir(), "does-not-exist", "run.log")}
+
+	if err := runner.Run("sh", "-c", "true"); err == nil {
+		t.Fatal("expected an error when the log file cannot be opened")
+	}
+}
+
+func TestLoggedCommandRunner_Output_DelegatesToWrappedRunner(t *testing.T) {
+	runner := LoggedCommandRunner{LogFile: filepath.Join(t.TempDir(), "run.log")}
+
+	output, err := runner.Output("sh", "-c", "echo delegated")
+	if err != nil {
+		t.Fatalf("Output returned error: %v", err)
+	}
+
+	if got := strings.TrimSpace(string(output)); got != "delegated" {
+		t.Fatalf("expected output %q, got %q", "delegated", got)
+	}
+}
+
+func TestLoggedCommandRunner_LookPath_DelegatesToWrappedRunner(t *testing.T) {
+	runner := LoggedCommandRunner{LogFile: filepath.Join(t.TempDir(), "run.log")}
+
+	if _, err := runner.LookPath("sh"); err != nil {
+		t.Fatalf("LookPath returned error for a binary that should be on PATH: %v", err)
+	}
+}
+
 func TestOSCommandRunner_RunInDirWithEnvSetsWorkingDirectory(t *testing.T) {
 	dir := t.TempDir()
 	outputPath := filepath.Join(dir, "pwd-output.txt")

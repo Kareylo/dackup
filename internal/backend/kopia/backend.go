@@ -25,6 +25,13 @@ func (backend Backend) Name() string {
 	return Name
 }
 
+// BinaryName returns the kopia binary this Backend will invoke, resolved
+// from Config.Bin (falling back to DefaultBin) — implements the optional
+// backend.BinaryChecker interface so preflight can verify it's on PATH.
+func (backend Backend) BinaryName() string {
+	return backend.Config.bin()
+}
+
 // Backup implements the plain backend.Backend fallback used when a caller
 // doesn't know about container groups: stagingDir itself is snapshotted as
 // a single source into the global repository.

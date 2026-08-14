@@ -38,6 +38,12 @@ func (logger FileLogger) Log(level string, message string) {
 	defer logFile.Close()
 
 	writer := bufio.NewWriter(logFile)
-	_, _ = writer.WriteString(line + "\n")
-	_ = writer.Flush()
+	if _, err := writer.WriteString(line + "\n"); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to write log file: %v\n", err)
+		return
+	}
+
+	if err := writer.Flush(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to write log file: %v\n", err)
+	}
 }

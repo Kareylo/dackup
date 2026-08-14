@@ -1,7 +1,14 @@
 package kopia
 
 import (
+	"dackup/internal/backend/kopia/storage/azure"
+	"dackup/internal/backend/kopia/storage/b2"
 	"dackup/internal/backend/kopia/storage/filesystem"
+	"dackup/internal/backend/kopia/storage/gcs"
+	"dackup/internal/backend/kopia/storage/rclone"
+	"dackup/internal/backend/kopia/storage/s3"
+	"dackup/internal/backend/kopia/storage/sftp"
+	"dackup/internal/backend/kopia/storage/webdav"
 	"dackup/internal/shared"
 	"fmt"
 	"os"
@@ -175,6 +182,62 @@ func TestConfig_ValidateUnknownStorageTypeReturnsError(t *testing.T) {
 	}
 }
 
+func TestConfig_Provider_ReturnsTheConfiguredStorageProvider(t *testing.T) {
+	cases := []struct {
+		name   string
+		config Config
+	}{
+		{filesystem.Name, Config{StorageType: filesystem.Name}},
+		{s3.Name, Config{StorageType: s3.Name, S3: &s3.Storage{}}},
+		{sftp.Name, Config{StorageType: sftp.Name, SFTP: &sftp.Storage{}}},
+		{b2.Name, Config{StorageType: b2.Name, B2: &b2.Storage{}}},
+		{azure.Name, Config{StorageType: azure.Name, Azure: &azure.Storage{}}},
+		{gcs.Name, Config{StorageType: gcs.Name, GCS: &gcs.Storage{}}},
+		{rclone.Name, Config{StorageType: rclone.Name, Rclone: &rclone.Storage{}}},
+		{webdav.Name, Config{StorageType: webdav.Name, WebDAV: &webdav.Storage{}}},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			provider, err := tt.config.provider("")
+			if err != nil {
+				t.Fatalf("provider returned error: %v", err)
+			}
+
+			if provider == nil {
+				t.Fatal("expected a non-nil provider")
+			}
+		})
+	}
+}
+
+func TestConfig_Provider_MissingSettingsBlockReturnsError(t *testing.T) {
+	cases := []string{s3.Name, sftp.Name, b2.Name, azure.Name, gcs.Name, rclone.Name, webdav.Name}
+
+	for _, storageType := range cases {
+		t.Run(storageType, func(t *testing.T) {
+			_, err := (Config{StorageType: storageType}).provider("")
+			if err == nil {
+				t.Fatalf("expected an error for a missing %q settings block", storageType)
+			}
+		})
+	}
+}
+
+func TestBackend_BinaryName(t *testing.T) {
+	got := Backend{Config: Config{Bin: "/usr/local/bin/kopia"}}.BinaryName()
+	if got != "/usr/local/bin/kopia" {
+		t.Fatalf("expected %q, got %q", "/usr/local/bin/kopia", got)
+	}
+}
+
+func TestBackend_BinaryName_DefaultsToBareCommandName(t *testing.T) {
+	got := Backend{}.BinaryName()
+	if got != DefaultBin {
+		t.Fatalf("expected %q, got %q", DefaultBin, got)
+	}
+}
+
 func TestParseConfig_AppliesDefaults(t *testing.T) {
 	if _, err := ParseConfig(nil); err == nil {
 		t.Fatal("expected error: no encrypted_password provided")
@@ -242,6 +305,35 @@ func TestBackend_Backup_ConnectsToExistingRepoThenCreatesSnapshot(t *testing.T) 
 	wantSnapshotArgs := []string{"snapshot", "create", "/staging", "--config-file=" + globalConfigPath}
 	if !equalArgs(snapshotCall.args, wantSnapshotArgs) {
 		t.Fatalf("expected snapshot create args %v, got %v", wantSnapshotArgs, snapshotCall.args)
+	}
+}
+
+// TestBackend_Backup_SnapshotCreateCarriesStorageEnv guards against a real
+// bug found via live testing: kopia's local --config-file caches enough to
+// reconnect to a repository without re-supplying its own password, but the
+// underlying client library (here, the AWS SDK) re-reads env-var-based
+// storage credentials fresh on every invocation — so "snapshot create"
+// needs them too, not just the initial "repository connect/create". S3
+// (env-var credentials) is used here specifically because filesystem, the
+// other tests' default storage type, has no extra env vars to omit —
+// omitting them would pass either way and not catch this.
+func TestBackend_Backup_SnapshotCreateCarriesStorageEnv(t *testing.T) {
+	runner := &fakeEnvRunner{}
+	backend := testBackend(runner, newFakeFileSystem(), &fakeLogger{})
+	backend.Config.StorageType = s3.Name
+	backend.Config.S3 = &s3.Storage{Bucket: "my-bucket", AccessKeyID: "AKID", EncryptedSecretAccessKey: "enc:secret"}
+
+	if err := backend.Backup("/staging"); err != nil {
+		t.Fatalf("Backup returned error: %v", err)
+	}
+
+	if len(runner.calls) != 2 {
+		t.Fatalf("expected 2 calls (connect, snapshot create), got %d: %+v", len(runner.calls), runner.calls)
+	}
+
+	snapshotCall := runner.calls[1]
+	if !containsEnv(snapshotCall.env, "AWS_ACCESS_KEY_ID=AKID") || !containsEnv(snapshotCall.env, "AWS_SECRET_ACCESS_KEY=secret") {
+		t.Fatalf("expected snapshot create to carry S3 credentials, got env %v", snapshotCall.env)
 	}
 }
 
@@ -417,6 +509,39 @@ func TestBackend_Restore_RestoresLatestSnapshot(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected restore target to be created before restore, mkdirs: %v", fs.mkdirs)
+	}
+}
+
+// TestBackend_Restore_SnapshotListAndRestoreCarryStorageEnv is the restore
+// side of TestBackend_Backup_SnapshotCreateCarriesStorageEnv's regression
+// guard: "snapshot list" and "snapshot restore" both need storage
+// credentials on every call, not just the initial "repository connect".
+func TestBackend_Restore_SnapshotListAndRestoreCarryStorageEnv(t *testing.T) {
+	runner := &fakeEnvRunner{
+		outputs: map[string][]byte{
+			"snapshot list /staging --json --config-file=" + globalConfigPath: []byte(`[{"id":"k1a"}]`),
+		},
+	}
+	backend := testBackend(runner, newFakeFileSystem(), &fakeLogger{})
+	backend.Config.StorageType = s3.Name
+	backend.Config.S3 = &s3.Storage{Bucket: "my-bucket", AccessKeyID: "AKID", EncryptedSecretAccessKey: "enc:secret"}
+
+	if err := backend.Restore("/staging"); err != nil {
+		t.Fatalf("Restore returned error: %v", err)
+	}
+
+	if len(runner.calls) != 3 {
+		t.Fatalf("expected 3 calls (connect, list, restore), got %d: %+v", len(runner.calls), runner.calls)
+	}
+
+	listCall := runner.calls[1]
+	if !containsEnv(listCall.env, "AWS_ACCESS_KEY_ID=AKID") || !containsEnv(listCall.env, "AWS_SECRET_ACCESS_KEY=secret") {
+		t.Fatalf("expected snapshot list to carry S3 credentials, got env %v", listCall.env)
+	}
+
+	restoreCall := runner.calls[2]
+	if !containsEnv(restoreCall.env, "AWS_ACCESS_KEY_ID=AKID") || !containsEnv(restoreCall.env, "AWS_SECRET_ACCESS_KEY=secret") {
+		t.Fatalf("expected snapshot restore to carry S3 credentials, got env %v", restoreCall.env)
 	}
 }
 

@@ -3,7 +3,7 @@ package backup
 import (
 	"dackup/internal/backend"
 	"dackup/internal/shared"
-	"path/filepath"
+	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -112,8 +112,18 @@ func runBackup(requestedContainers []string, srcDirFlagChanged bool, dstDirFlagC
 
 	applyBackupDirectoryConfig(config, srcDirFlagChanged, dstDirFlagChanged)
 
-	service := newCommandService()
+	return runBackupWithService(newCommandService(), config, effectiveConfigPath, requestedContainers)
+}
 
+// runBackupWithService is runBackup's testable core: it takes an already-built
+// commandService instead of constructing one via newCommandService(), so
+// tests can inject fakes for fs/runner/logger instead of hitting the OS.
+func runBackupWithService(
+	service commandService,
+	config shared.DackupConfig,
+	effectiveConfigPath string,
+	requestedContainers []string,
+) error {
 	backupBackend, err := resolveBackend(service, config)
 	if err != nil {
 		return err
@@ -124,7 +134,21 @@ func runBackup(requestedContainers []string, srcDirFlagChanged bool, dstDirFlagC
 		return err
 	}
 
-	if err := preflightChecks(effectiveConfigPath, config, configs); err != nil {
+	if err := shared.PreflightChecks(
+		"backup",
+		effectiveConfigPath,
+		config,
+		configs,
+		backupSrcDir,
+		backupDstDir,
+		service.paths,
+		service.fs,
+		service.runner,
+	); err != nil {
+		return err
+	}
+
+	if err := checkBackendBinary(backupBackend, service.runner); err != nil {
 		return err
 	}
 
@@ -141,6 +165,9 @@ func runBackup(requestedContainers []string, srcDirFlagChanged bool, dstDirFlagC
 
 	stoppedContainers, err := lifecycleService.StopRunningContainers(containersToStop, "backup")
 	if err != nil {
+		if restartErr := lifecycleService.StartStoppedContainers(stoppedContainers, "backup"); restartErr != nil {
+			return fmt.Errorf("%w (additionally failed to restart already-stopped containers: %v)", err, restartErr)
+		}
 		return err
 	}
 
@@ -191,6 +218,25 @@ func resolveBackend(service commandService, config shared.DackupConfig) (backend
 	return factory.GetBackend(config.Backend, config.BackendSettings)
 }
 
+// checkBackendBinary verifies the resolved backend's CLI binary is on PATH,
+// if it has one (see backend.BinaryChecker) — before any containers are
+// stopped, rather than letting a missing borg/kopia binary surface only
+// when Backend.Backup() runs as the very last step.
+func checkBackendBinary(resolvedBackend backend.Backend, runner shared.CommandRunner) error {
+	binaryChecker, ok := resolvedBackend.(backend.BinaryChecker)
+	if !ok {
+		return nil
+	}
+
+	binaryName := binaryChecker.BinaryName()
+
+	if _, err := runner.LookPath(binaryName); err != nil {
+		return fmt.Errorf("backend %q binary %q not found on PATH", resolvedBackend.Name(), binaryName)
+	}
+
+	return nil
+}
+
 func applyBackupDirectoryConfig(config shared.DackupConfig, srcDirFlagChanged bool, dstDirFlagChanged bool) {
 	if !srcDirFlagChanged && strings.TrimSpace(config.DataDir) != "" {
 		backupSrcDir = config.DataDir
@@ -213,49 +259,12 @@ func selectContainerAndContainedForBackup(
 	shared.SelectContainerAndContained(containerName, configByContainer, selected)
 }
 
-func preflightChecks(effectiveConfigPath string, config shared.DackupConfig, configs []shared.ContainerConfig) error {
-	service := newCommandService()
-	return shared.PreflightChecks(
-		"backup",
-		effectiveConfigPath,
-		config,
-		configs,
-		backupSrcDir,
-		backupDstDir,
-		service.paths,
-		service.fs,
-		service.runner,
-	)
-}
-
 func containersToStopFromConfig(configs []shared.ContainerConfig) []string {
 	return shared.ContainersToStopFromConfig(configs)
 }
 
 func addContainer(container string, seen map[string]bool, containers *[]string) {
 	shared.AddUniqueContainer(container, seen, containers)
-}
-
-func runConfiguredBackups(configs []shared.ContainerConfig) error {
-	return newCommandService().transfer.Run(configs)
-}
-
-func backupSinglePath(container string, srcPath string, dstPath string) error {
-	return newCommandService().transfer.SinglePath(container, srcPath, dstPath)
-}
-
-func fixBackupOwnership(owner string, group string) error {
-	return newCommandService().transfer.FixBackupOwnership(owner, group)
-}
-
-func sourcePath(configuredPath string) string {
-	cleanPath := cleanConfiguredPath(configuredPath)
-	return filepath.Join(backupSrcDir, cleanPath)
-}
-
-func destinationPath(configuredPath string) string {
-	cleanPath := cleanConfiguredPath(configuredPath)
-	return filepath.Join(backupDstDir, cleanPath)
 }
 
 func cleanConfiguredPath(configuredPath string) string {

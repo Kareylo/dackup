@@ -60,3 +60,22 @@ func TestStorage_BuildInvocation(t *testing.T) {
 		t.Fatalf("expected args %v, got %v", wantArgs, invocation.Args)
 	}
 }
+
+func TestStorage_BuildInvocationWithStorageDomain(t *testing.T) {
+	s := Storage{
+		Container:           "my-container",
+		StorageAccount:      "myaccount",
+		EncryptedStorageKey: "enc:storagekey",
+		StorageDomain:       "localhost:10000",
+	}
+
+	invocation, err := s.BuildInvocation("myrepo", fakeSecretStore{})
+	if err != nil {
+		t.Fatalf("BuildInvocation returned error: %v", err)
+	}
+
+	wantArgs := []string{"--container=my-container", "--storage-account=myaccount", "--storage-key=storagekey", "--prefix=myrepo/", "--storage-domain=localhost:10000"}
+	if !equalArgs(invocation.Args, wantArgs) {
+		t.Fatalf("expected args %v, got %v", wantArgs, invocation.Args)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"dackup/internal/backend/kopia/storage"
 	"dackup/internal/shared"
 	"fmt"
+	"net/http"
 	"strings"
 )
 
@@ -58,6 +59,52 @@ func (s Storage) BuildInvocation(repoName string, secrets shared.SecretStore) (s
 	}
 
 	return storage.Invocation{Kind: Name, Args: args}, nil
+}
+
+// EnsureCollection creates repoName's WebDAV collection (directory) via
+// MKCOL if it doesn't already exist. Unlike kopia's other storage
+// providers, its WebDAV client never creates the target directory itself —
+// confirmed by driving it against a real WebDAV server and finding no
+// MKCOL request in the server's logs, just PUT attempts straight into a
+// directory that doesn't exist yet, failing with a filesystem-level
+// "no such file or directory" translated to an HTTP 403 — it assumes the
+// URL it's given already points at an existing, empty collection. So
+// Backend.createArgs calls this before "repository create webdav", the
+// same way it MkdirAll's a local directory before "repository create
+// filesystem" (see repository.go's createArgs doc comment). A 405 (Method
+// Not Allowed — MKCOL's response for a collection that already exists) is
+// not an error; every other non-2xx status is.
+func (s Storage) EnsureCollection(repoName string, secrets shared.SecretStore) error {
+	url := urlJoin(s.URL, repoName)
+
+	req, err := http.NewRequest("MKCOL", url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to build MKCOL request for %s: %w", url, err)
+	}
+
+	if s.Username != "" {
+		password, err := secrets.Decrypt(s.EncryptedPassword)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt kopia webdav password: %w", err)
+		}
+		req.SetBasicAuth(s.Username, password)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to create WebDAV collection %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusMethodNotAllowed {
+		return nil
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("failed to create WebDAV collection %s: unexpected status %s", url, resp.Status)
+	}
+
+	return nil
 }
 
 // urlJoin appends repoName as a path segment onto a base URL. Unlike

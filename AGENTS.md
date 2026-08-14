@@ -52,29 +52,63 @@ The project is organized around top-level Cobra commands:
 .
 ├── cmd/
 │ ├── backend/
-│ │ ├── backend.go
+│ │ ├── backend.go       # create/show/update/remove wiring
+│ │ ├── borg.go           # borg settings prompt
+│ │ ├── kopia.go          # kopia settings prompts, incl. per-storage-type
+│ │ ├── prompts.go
+│ │ ├── print.go
 │ │ └── backend_test.go
 │ ├── backup/
-│ │ ├── backup.go
-│ │ └── backup_test.go
+│ │ ├── backup.go          # runBackup + testable runBackupWithService core
+│ │ ├── backup_test.go
+│ │ └── orchestration_test.go
 │ ├── config/
-│ │ ├── config.go
-│ │ ├── config_helper.go
+│ │ ├── config.go          # wiring + init/add/update/remove/list/use-file handlers
+│ │ ├── prompts.go
+│ │ ├── print.go
+│ │ ├── config_helper.go   # thin shared.* compatibility shim
+│ │ ├── config_test.go
 │ │ ├── config_helper_test.go
-│ │ └── config_test.go
+│ │ └── orchestration_test.go
 │ ├── restore/
-│ │ ├── restore.go
-│ │ └── restore_test.go
+│ │ ├── restore.go         # near-mirror of backup.go, reversed direction (see F015)
+│ │ ├── restore_test.go
+│ │ └── orchestration_test.go
+│ ├── version/
+│ │ ├── version.go
+│ │ └── version_test.go
 │ ├── fixtures_test.go
 │ ├── root.go
 │ └── root_test.go
 ├── internal/
 │ ├── backend/
-│ │ ├── backend.go
+│ │ ├── backend.go        # Backend, GroupedBackend, BinaryChecker interfaces
 │ │ ├── backend_test.go
-│ │ ├── defaultbackend/
+│ │ ├── default/           # no-op Backend (package name defaultbackend)
 │ │ │ ├── defaultbackend.go
 │ │ │ └── defaultbackend_test.go
+│ │ ├── borg/               # first concrete backend
+│ │ │ ├── borg.go
+│ │ │ ├── borg_test.go
+│ │ │ └── integration_borg_test.go  # //go:build integration, real borg CLI
+│ │ ├── kopia/               # second concrete backend
+│ │ │ ├── kopia.go            # Config + consts
+│ │ │ ├── backend.go          # Backend/GroupedBackend methods
+│ │ │ ├── repository.go       # CLI mechanics per repository
+│ │ │ ├── integration_helpers.go
+│ │ │ ├── kopia_test.go
+│ │ │ └── storage/            # one subpackage per storage type
+│ │ │   ├── provider.go        # storage.Provider interface, Invocation, ObjectPrefix
+│ │ │   ├── filesystem/
+│ │ │   ├── s3/
+│ │ │   ├── sftp/
+│ │ │   ├── b2/
+│ │ │   ├── azure/
+│ │ │   ├── gcs/
+│ │ │   ├── rclone/
+│ │ │   └── webdav/
+│ │ │     # each: <type>.go, <type>_test.go, and (except filesystem/rclone)
+│ │ │     # integration_<type>_test.go behind //go:build integration
 │ │ ├── factory.go
 │ │ ├── factory_test.go
 │ │ ├── registry.go
@@ -83,19 +117,30 @@ The project is organized around top-level Cobra commands:
 │ │ └── settings_test.go
 │ └── shared/
 │   ├── command_runner.go
+│   ├── command_runner_test.go
+│   ├── container_groups.go
+│   ├── backend_groups_test.go
+│   ├── container_groups_test.go
 │   ├── container_lifecycle.go
+│   ├── container_lifecycle_test.go
 │   ├── container_selection.go
 │   ├── docker.go
 │   ├── filesystem.go
 │   ├── logger.go
 │   ├── paths.go
 │   ├── preflight.go
+│   ├── preflight_test.go
 │   ├── prompts.go
+│   ├── secrets.go
+│   ├── secrets_test.go
 │   ├── shared.go
 │   ├── shared_test.go
-│   └── transfer.go
+│   ├── transfer.go
+│   └── transfer_test.go
 └── main.go
 ```
+
+`internal/backend/kopia/storage/<type>/` is listed collapsed above since all seven follow the same shape — see AGENTS.md's "Backend interface" section below for the per-type detail. Everything else is listed exhaustively; regenerate this diagram (`find cmd internal main.go -name '*.go' | sort`) whenever it drifts rather than letting it go stale again.
 
 Top-level command packages should expose constructors:
 
@@ -290,7 +335,7 @@ Optional per-repository compression is set as kopia's global policy (`kopia poli
 
 `internal/backend/kopia` is deliberately split one-package-per-responsibility rather than kept as a single `kopia.go` (it grew past 1000 lines once all seven storage types landed there, which is exactly the "bucket file" this repo's File Naming Guidelines warn against). Within the `kopia` package itself: `kopia.go` holds only `Config` and its top-level consts; `backend.go` holds the `Backend` type, its `backend.Backend`/`backend.GroupedBackend` methods, and its dependency defaults; `repository.go` holds the lower-level mechanics of driving the CLI against one named repository (`ensureRepo`, `connectArgs`/`createArgs`, snapshot create/list/restore). Storage types go a level further than file-per-responsibility — each is its own **subpackage** under `internal/backend/kopia/storage/`: `storage/s3`, `storage/sftp`, `storage/b2`, `storage/azure`, `storage/gcs`, `storage/rclone`, `storage/webdav`, and the built-in `storage/filesystem` (`filesystem.Name` has no JSON settings block of its own — `filesystem.Storage` just wraps `ReposRoot`, the one field it needs). A real Go package boundary (not just a filename convention) means one storage type's file can never accidentally reach into another's internals, `go test ./internal/backend/kopia/storage/s3/...` scopes to exactly one type, and each package's own `Storage` type is named plainly (`s3.Storage`, not `s3.S3Storage`) since the package name already disambiguates — avoiding the stutter `XStorage` naming had before this split.
 
-Every leaf subpackage implements the `storage.Provider` interface (`internal/backend/kopia/storage/provider.go`: `Validate() error` plus `BuildInvocation(repoName string, secrets shared.SecretStore) (storage.Invocation, error)`), which lives in the parent `storage` package alongside the `storage.Invocation` result type and the shared `storage.ObjectPrefix` helper — every leaf package imports `storage`, `storage` imports none of them, so there's no cycle even though `internal/backend/kopia` itself imports both `storage` and every leaf. Before this interface existed, `StorageType` was switched on in two separate places — `Config.Validate()` (checking the right `*XStorage` field was non-nil) and `Backend.storageInvocation()` (building that type's CLI args) — that had to be kept in sync by hand on every change; that's a "Switch Statements" code smell (see the `solid` skill's code-smell list) as much as it's a DRY violation. `Config.provider(reposRoot string)` is now the *only* place that switches on `StorageType` (comparing against each leaf package's own `Name` constant), resolving it once into a `storage.Provider` that both `Validate()` and `Backend.storageInvocation()` call through — `Backend.storageInvocation` itself is now a five-line delegation to `backend.Config.provider(backend.ReposRoot).BuildInvocation(...)`. Adding an eighth storage type means: one new `storage/<name>` subpackage implementing `storage.Provider` (with its own `Name` constant, `Storage` struct, `Validate()`, `BuildInvocation()`, and `_test.go` testing the type directly — no `Backend`/CLI-runner fakes needed for that, since `BuildInvocation` only needs a `shared.SecretStore`), one field on `kopia.Config`, one case in `Config.provider`, and one `cmd/backend` prompt function — no existing storage type's package changes. The one deliberate exception is `Backend.createArgs`'s filesystem-only local-directory creation (`MkdirAll` before `repository create`): that needs `shared.FileSystem`, which `storage.Provider` intentionally does not depend on — adding it to the interface just for one provider would force the other seven to carry a dependency they never use (Interface Segregation), so that one case stays as an explicit `if invocation.Kind == filesystem.Name` branch in `Backend` (importing just that one leaf package), not inside the interface.
+Every leaf subpackage implements the `storage.Provider` interface (`internal/backend/kopia/storage/provider.go`: `Validate() error` plus `BuildInvocation(repoName string, secrets shared.SecretStore) (storage.Invocation, error)`), which lives in the parent `storage` package alongside the `storage.Invocation` result type and the shared `storage.ObjectPrefix` helper — every leaf package imports `storage`, `storage` imports none of them, so there's no cycle even though `internal/backend/kopia` itself imports both `storage` and every leaf. Before this interface existed, `StorageType` was switched on in two separate places — `Config.Validate()` (checking the right `*XStorage` field was non-nil) and `Backend.storageInvocation()` (building that type's CLI args) — that had to be kept in sync by hand on every change; that's a "Switch Statements" code smell (see the `solid` skill's code-smell list) as much as it's a DRY violation. `Config.provider(reposRoot string)` is now the *only* place that switches on `StorageType` (comparing against each leaf package's own `Name` constant), resolving it once into a `storage.Provider` that both `Validate()` and `Backend.storageInvocation()` call through — `Backend.storageInvocation` itself is now a five-line delegation to `backend.Config.provider(backend.ReposRoot).BuildInvocation(...)`. Adding an eighth storage type means: one new `storage/<name>` subpackage implementing `storage.Provider` (with its own `Name` constant, `Storage` struct, `Validate()`, `BuildInvocation()`, and `_test.go` testing the type directly — no `Backend`/CLI-runner fakes needed for that, since `BuildInvocation` only needs a `shared.SecretStore`), one field on `kopia.Config`, one case in `Config.provider`, and one `cmd/backend` prompt function — no existing storage type's package changes. The deliberate exceptions are in `Backend.createArgs`, for storage types kopia's own client doesn't prepare the target location for — confirmed by driving each against a real backing service, not assumed: `filesystem` (`MkdirAll` before `repository create`, since kopia's filesystem provider expects the target directory to already exist) and `webdav` (`webdav.Storage.EnsureCollection`, an HTTP `MKCOL` call before `repository create`, since kopia's webdav client — confirmed via a real WebDAV server's logs, which showed `PUT`/`GET`/`PROPFIND` but never `MKCOL` — never creates the target collection itself and just fails with a filesystem-level "no such file or directory", surfaced as an HTTP 403, the first time it tries to write into a directory that doesn't exist; a 405 from `MKCOL` means the collection already exists and isn't an error). Both need a capability (`shared.FileSystem`, an HTTP client) `storage.Provider` intentionally does not carry — adding either to the interface just for one provider would force the rest to carry a dependency they never use (Interface Segregation) — so both stay as explicit `switch invocation.Kind` cases in `Backend` (importing just those two leaf packages), not inside the interface.
 
 ## Docker Integration Decision
 
@@ -461,6 +506,50 @@ cmd/root_test.go
 For command package tests, prefer local test helpers instead of importing unexported helpers from another package.
 
 Avoid tests depending on package-private symbols from unrelated packages.
+
+`cmd/backup/orchestration_test.go` and `cmd/restore/orchestration_test.go` each define their own near-identical `fakeOrchestrationRunner`/`fakeOrchestrationLogger`/`fakeBinaryBackend`/`touchFile`/`containerFromFilterArg` — deliberate duplication, following the rule above, not an oversight. `internal/shared/container_lifecycle_test.go` has its own differently-shaped variant of the same runner/logger fake pattern for the same reason. Leave these as separate copies; do not extract a shared test-helper package across `cmd/backup`/`cmd/restore`/`internal/shared` to deduplicate them.
+
+### Kopia storage integration tests
+
+`internal/backend/kopia/storage/<type>/integration_<type>_test.go` (`storage/azure`, `storage/gcs`, `storage/s3`, `storage/sftp`, `storage/webdav`, beside each type's own `<type>_test.go`) drive the real `kopia` CLI against local emulator containers (`test/compose.yml`: `test_minio`, `test_sftp`, `test_webdav`, `test_azurite`, `test_gcs`) rather than fakes, one file per storage type, each behind a `//go:build integration` tag so the default `go test ./...` stays hermetic (no Docker or `kopia` binary required). Each is an external `<type>_test` package that imports `dackup/internal/backend/kopia` and drives it through exported, build-tag-gated helpers (`kopia.RequireKopiaBinary`, `kopia.LoadIntegrationConfig`, `kopia.NewIntegrationBackend`, `kopia.RunBackupRestoreRoundTrip`, ...) defined in `internal/backend/kopia/integration_helpers.go` — an ordinary (non-`_test.go`) file, because Go test files are only visible within their own package's test binary and these helpers need to be reachable from five different storage subpackages' test binaries. Run them with:
+
+```bash
+docker compose -f test/compose.yml up -d
+go test -tags=integration ./internal/backend/kopia/...
+```
+
+Each test skips (not fails) if the `kopia` binary or its target container isn't reachable, so this degrades cleanly without the containers running. Fixtures live at `test/config.<type>.json`, decrypted via a dedicated, repo-committed `test/secret.key` — never the real `~/.config/dackup/secret.key` — so they're portable across machines rather than tied to whoever generated them. Because kopia keys a repository's snapshots by the literal source path string given to `snapshot create`, each test's round-trip helper backs up and restores using the *same* directory (matching real dackup usage, where restore always writes back into the same `data_dir` a backup came from) rather than two different temp dirs.
+
+Every CLI flag `internal/backend/kopia/storage/*` sends to `kopia` was verified against a real `kopia repository create <type> --help` (not just written from memory) — this caught one real bug: SFTP's password flag is `--sftp-password`, not `--password` (reserved for the repository password itself). Two storage types remain genuinely uncertain even with correct flags, and their integration tests say so:
+
+- **azure** (`storage/azure`): `--storage-domain` overrides the domain in an otherwise virtual-hosted-style URL, but Azurite serves path-style URLs instead — this may not actually reach Azurite even though the flag itself is real.
+- **gcs** (`storage/gcs`): kopia documents no endpoint-override flag for GCS; `EmulatorHost` sets `STORAGE_EMULATOR_HOST`, a convention Google's own client libraries respect, betting kopia's GCS backend uses one under the hood — unconfirmed.
+
+### Borg integration tests
+
+`internal/backend/borg/integration_borg_test.go` drives the real `borg` CLI against local `t.TempDir()` repositories, behind the same `//go:build integration` tag as Kopia's storage tests. Unlike Kopia, Borg only ever talks to a local repository directory (no remote storage type), so this needs no `docker compose` container — just the `borg` binary on PATH:
+
+```bash
+go test -tags=integration ./internal/backend/borg/...
+```
+
+It's also picked up by `make test-integration` (which does start the Kopia storage emulators first, unconditionally — there's no way to run only Borg's tests through that target without also requiring Docker; use the `go test` command above directly if Docker isn't available but `borg` is). Every test skips (not fails) if the `borg` binary isn't on PATH.
+
+Unlike Kopia's fixtures, this needs no `test/config.borg.json`/`test/secret.key` entry: Borg has no remote credentials to keep portable across machines, so each test that needs an encrypted repository generates its own passphrase and a throwaway `AESFileSecretStore` key under a fresh `t.TempDir()` rather than reading a committed fixture. Covers: unencrypted (`encryption: "none"`) and encrypted (`repokey`) round trips, the `compression` flag, `BackupGroups`/`RestoreGroups` (one archive per container group plus the global mirror), and the graceful no-op when restoring from a repository that was never backed up to.
+
+### Dockerized integration tests
+
+Both suites above require `borg`/`kopia` on `PATH`, which a contributor's machine or a CI runner may not have — and even when present, nothing pins their version (a real problem: this repo's own dev environment had a `kopia` binary with no reproducible version string at all). `test/Dockerfile` builds dackup and runs the full suite (`go test -tags=integration -cover ./...`) inside an image with `borgbackup` (via apt, unpinned — same as the Makefile's own `deps-install`) and a specific pinned `kopia` release (`ARG KOPIA_VERSION`, installed from its GitHub release `.deb`, not Debian's apt repos, which don't package it).
+
+It's wired in as the `test_dackup` service in `test/compose.yml`, run via:
+
+```bash
+make test-integration-docker
+```
+
+which starts the same emulator containers as `make test-integration`, waits on the same init containers, then builds and runs `test_dackup` instead of `go test` on the host. `test_dackup` uses `network_mode: host` (Linux only, matching this project's dev/CI targets) specifically so it reaches the emulator containers through their published `localhost:<port>` addresses exactly like the host-executed path does — every integration test's config (`test/config.<type>.json`) and `RequireReachable` call hardcodes `localhost`, and none of that needed to change to make this work. It's gated behind Compose's `docker-tests` profile so a plain `docker compose -f test/compose.yml up -d` (what `make test-integration` itself runs first) doesn't also try to build and start it.
+
+The host-executed `make test-integration` is left in place rather than replaced — a contributor who already has `borg`/`kopia` installed locally doesn't need a Docker build step, and Docker's `network_mode: host` doesn't work the same way on non-Linux Docker Desktop hosts.
 
 ## Compatibility Wrappers
 

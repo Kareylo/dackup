@@ -40,9 +40,17 @@ func (factory Factory) GetBackend(name string, settings json.RawMessage) (Backen
 	}
 }
 
+func requireBackendDir(name string, backendDir string) error {
+	if strings.TrimSpace(backendDir) == "" {
+		return fmt.Errorf("backend %q requires backend_dir to be set in the main config", name)
+	}
+
+	return nil
+}
+
 func (factory Factory) getBorgBackend(settings json.RawMessage) (Backend, error) {
-	if strings.TrimSpace(factory.BackendDir) == "" {
-		return nil, fmt.Errorf("backend %q requires backend_dir to be set in the main config", borg.Name)
+	if err := requireBackendDir(borg.Name, factory.BackendDir); err != nil {
+		return nil, err
 	}
 
 	config, err := borg.ParseConfig(settings)
@@ -61,8 +69,8 @@ func (factory Factory) getBorgBackend(settings json.RawMessage) (Backend, error)
 }
 
 func (factory Factory) getKopiaBackend(settings json.RawMessage) (Backend, error) {
-	if strings.TrimSpace(factory.BackendDir) == "" {
-		return nil, fmt.Errorf("backend %q requires backend_dir to be set in the main config", kopia.Name)
+	if err := requireBackendDir(kopia.Name, factory.BackendDir); err != nil {
+		return nil, err
 	}
 
 	config, err := kopia.ParseConfig(settings)

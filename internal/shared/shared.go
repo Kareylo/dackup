@@ -96,7 +96,7 @@ func WriteDackupConfig(path string, config DackupConfig, options *Options) error
 
 	content = append(content, '\n')
 
-	if err := os.WriteFile(path, content, 0o644); err != nil {
+	if err := os.WriteFile(path, content, 0o600); err != nil {
 		return fmt.Errorf("failed to write config file %s: %w", path, err)
 	}
 
