@@ -1,13 +1,14 @@
-# Builds dackup and runs its full test suite, including the borg + kopia
-# storage "//go:build integration" tests (see AGENTS.md's "Borg integration
-# tests" / "Kopia storage integration tests" sections), against real,
-# pinned borg/kopia binaries instead of whatever (if anything) happens to
-# be on a contributor's or CI runner's PATH. Run via the "test_dackup"
-# service in test/compose.yml (`make test-integration-docker`), which
-# starts it with network_mode: host so it reaches the emulator containers
-# the same way the host-executed `make test-integration` does — through
-# their published localhost ports — without touching any of the
-# integration tests' hardcoded "localhost:<port>" config.
+# Builds dackup and runs its full test suite, including the borg + kopia +
+# restic "//go:build integration" tests (see AGENTS.md's "Borg integration
+# tests" / "Kopia storage integration tests" / "Restic integration tests"
+# sections), against real, pinned borg/kopia/restic binaries instead of
+# whatever (if anything) happens to be on a contributor's or CI runner's
+# PATH. Run via the "test_dackup" service in test/compose.yml
+# (`make test-integration-docker`), which starts it with network_mode: host
+# so it reaches the emulator containers the same way the host-executed
+# `make test-integration` does — through their published localhost ports —
+# without touching any of the integration tests' hardcoded
+# "localhost:<port>" config.
 FROM golang:1.26.2-bookworm
 
 # kopia isn't packaged in Debian's apt repos, and unlike borg its exact
@@ -18,6 +19,15 @@ FROM golang:1.26.2-bookworm
 # place: a locally installed kopia with no reproducible version at all.
 ARG KOPIA_VERSION=0.23.1
 
+# restic is pinned the same way and for the same reason as kopia above.
+# Debian bookworm does package a restic, but at a version this repo doesn't
+# control the freshness of; restic's own release process publishes
+# prebuilt binaries as a single bzip2-compressed file per platform (no
+# .deb), unlike kopia's GitHub-released .deb — confirmed against the
+# restic/restic GitHub releases API, whose linux/amd64 asset is named
+# "restic_<version>_linux_amd64.bz2".
+ARG RESTIC_VERSION=0.19.1
+
 # borgbackup is left unpinned, tracking whatever version Debian bookworm's
 # own apt snapshot carries — consistent with the Makefile's own
 # `deps-install` target, which installs it the same unpinned way.
@@ -27,11 +37,17 @@ RUN apt-get update \
          rsync \
          make \
          curl \
+         bzip2 \
          ca-certificates \
     && curl -fsSLo /tmp/kopia.deb \
          "https://github.com/kopia/kopia/releases/download/v${KOPIA_VERSION}/kopia_${KOPIA_VERSION}_linux_amd64.deb" \
     && apt-get install -y --no-install-recommends /tmp/kopia.deb \
     && rm -f /tmp/kopia.deb \
+    && curl -fsSLo /tmp/restic.bz2 \
+         "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_linux_amd64.bz2" \
+    && bunzip2 /tmp/restic.bz2 \
+    && install -m 0755 /tmp/restic /usr/local/bin/restic \
+    && rm -f /tmp/restic \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src

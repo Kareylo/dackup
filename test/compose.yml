@@ -167,6 +167,57 @@ services:
       - "4443:4443"
     volumes:
       - test_gcs_data:/data
+  # test_restic_sftp_init chowns the test_restic_sftp_upload volume to the
+  # sftp user (uid/gid 1000), same reason as test_sftp_init above. Kept as
+  # a separate container/volume from test_sftp rather than reused: restic's
+  # sftp backend only supports SSH key auth (see
+  # internal/backend/restic/storage/sftp's doc comment), unlike kopia's own
+  # sftp storage type, which this stack's existing test_sftp exercises with
+  # password auth — switching that container's auth mode would break
+  # kopia's own sftp integration test.
+  test_restic_sftp_init:
+    image: busybox
+    container_name: test_restic_sftp_init
+    volumes:
+      - test_restic_sftp_upload:/upload
+    entrypoint: ["/bin/sh", "-c", "chown -R 1000:1000 /upload"]
+    restart: "no"
+  # test_restic_sftp authenticates via the throwaway keypair committed at
+  # test/restic_sftp_key/ (never a real credential — generated solely for
+  # this test stack) rather than a password: atmoz/sftp's
+  # "user::uid" command form (empty password field) disables password
+  # login for that user, and the mounted *.pub file under
+  # ~/.ssh/keys/ is appended to its authorized_keys, per atmoz/sftp's own
+  # documented public-key setup.
+  test_restic_sftp:
+    image: atmoz/sftp
+    container_name: test_restic_sftp
+    depends_on:
+      test_restic_sftp_init:
+        condition: service_completed_successfully
+    command: resticuser::1000
+    ports:
+      - "2223:22"
+    volumes:
+      - test_restic_sftp_upload:/home/resticuser/upload
+      - ./restic_sftp_key/id_ed25519.pub:/home/resticuser/.ssh/keys/id_ed25519.pub:ro
+  # test_restic_rest is restic's own REST server (restic/rest-server),
+  # restic's closest analogue to kopia's WebDAV storage type — restic has
+  # no native WebDAV support, and kopia has no REST-protocol support, so
+  # neither backend's stack can reuse the other's server container here.
+  # DISABLE_AUTHENTICATION keeps this test instance open — the
+  # RESTIC_REST_USERNAME/RESTIC_REST_PASSWORD env-var path
+  # (storage/rest.Storage's authenticated branch) is covered by its own
+  # unit test instead of a live server.
+  test_restic_rest:
+    image: restic/rest-server:latest
+    container_name: test_restic_rest
+    environment:
+      - DISABLE_AUTHENTICATION=true
+    ports:
+      - "8010:8000"
+    volumes:
+      - test_restic_rest_data:/data
   # test_dackup builds dackup and runs its full test suite (unit +
   # //go:build integration) against pinned borg/kopia binaries inside
   # test/Dockerfile, instead of on the host. network_mode: host (Linux
@@ -201,6 +252,10 @@ services:
         condition: service_started
       test_webdav:
         condition: service_started
+      test_restic_sftp:
+        condition: service_started
+      test_restic_rest:
+        condition: service_started
 
 volumes:
   test_data:
@@ -212,3 +267,5 @@ volumes:
   test_webdav_data:
   test_azurite_data:
   test_gcs_data:
+  test_restic_sftp_upload:
+  test_restic_rest_data:

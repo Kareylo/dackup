@@ -185,7 +185,7 @@ func TestSelectBackendName_RejectsUnknownThenAcceptsValid(t *testing.T) {
 func TestPromptBackendSettings_UnknownBackendReturnsNil(t *testing.T) {
 	service := newTestService("")
 
-	got, err := service.promptBackendSettings("restic", "", nil)
+	got, err := service.promptBackendSettings("unknown", "", nil)
 	if err != nil {
 		t.Fatalf("promptBackendSettings returned error: %v", err)
 	}

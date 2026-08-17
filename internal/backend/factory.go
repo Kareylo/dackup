@@ -4,6 +4,7 @@ import (
 	"dackup/internal/backend/borg"
 	"dackup/internal/backend/default"
 	"dackup/internal/backend/kopia"
+	"dackup/internal/backend/restic"
 	"dackup/internal/shared"
 	"encoding/json"
 	"fmt"
@@ -35,6 +36,8 @@ func (factory Factory) GetBackend(name string, settings json.RawMessage) (Backen
 		return factory.getBorgBackend(settings)
 	case kopia.Name:
 		return factory.getKopiaBackend(settings)
+	case restic.Name:
+		return factory.getResticBackend(settings)
 	default:
 		return nil, fmt.Errorf("unknown backend %q", name)
 	}
@@ -79,6 +82,26 @@ func (factory Factory) getKopiaBackend(settings json.RawMessage) (Backend, error
 	}
 
 	return kopia.Backend{
+		Config:    config,
+		ReposRoot: factory.BackendDir,
+		Runner:    factory.Runner,
+		Logger:    factory.Logger,
+		Options:   factory.Options,
+		Secrets:   factory.Secrets,
+	}, nil
+}
+
+func (factory Factory) getResticBackend(settings json.RawMessage) (Backend, error) {
+	if err := requireBackendDir(restic.Name, factory.BackendDir); err != nil {
+		return nil, err
+	}
+
+	config, err := restic.ParseConfig(settings)
+	if err != nil {
+		return nil, err
+	}
+
+	return restic.Backend{
 		Config:    config,
 		ReposRoot: factory.BackendDir,
 		Runner:    factory.Runner,

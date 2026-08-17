@@ -2,10 +2,10 @@ package backend
 
 import "testing"
 
-func TestAvailableBackends_ListsBorgAndKopia(t *testing.T) {
+func TestAvailableBackends_ListsBorgKopiaAndRestic(t *testing.T) {
 	got := AvailableBackends()
 
-	if len(got) != 2 || got[0] != "borg" || got[1] != "kopia" {
-		t.Fatalf("expected [\"borg\", \"kopia\"], got %#v", got)
+	if len(got) != 3 || got[0] != "borg" || got[1] != "kopia" || got[2] != "restic" {
+		t.Fatalf("expected [\"borg\", \"kopia\", \"restic\"], got %#v", got)
 	}
 }

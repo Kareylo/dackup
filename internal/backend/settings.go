@@ -3,6 +3,7 @@ package backend
 import (
 	"dackup/internal/backend/borg"
 	"dackup/internal/backend/kopia"
+	"dackup/internal/backend/restic"
 	"encoding/json"
 	"fmt"
 )
@@ -17,6 +18,8 @@ func ParseSettings(name string, raw json.RawMessage) (any, error) {
 		return borg.ParseConfig(raw)
 	case kopia.Name:
 		return kopia.ParseConfig(raw)
+	case restic.Name:
+		return restic.ParseConfig(raw)
 	default:
 		return nil, fmt.Errorf("unknown backend %q", name)
 	}

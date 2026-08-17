@@ -352,7 +352,7 @@ Build locally:
 go build -o build/dackup .
 ```
 
-`test/secret.key` and `test/config.*.json` are fixtures for the Kopia storage integration tests (local MinIO/Azurite/etc. emulators only, no real credentials) — it is not a template for the real `~/.config/dackup/secret.key`, and should never be copied into an actual deployment.
+`test/secret.key` and `test/config.*.json` are fixtures for the Kopia and Restic storage integration tests (local MinIO/Azurite/etc. emulators only, no real credentials) — it is not a template for the real `~/.config/dackup/secret.key`, and should never be copied into an actual deployment.
 
 ## Safety notes
 
@@ -367,7 +367,7 @@ Here is a list of todo things that should be implemented :
   - [ ] rclone
   - [x] Borg
   - [x] Kopia
-  - [ ] restic
+  - [x] restic
   - [ ] ... ?
 - [ ] Add podman integration, not only docker
 - [ ] More ... ?
