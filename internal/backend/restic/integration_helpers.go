@@ -14,6 +14,7 @@ package restic
 
 import (
 	"bytes"
+	"context"
 	"dackup/internal/shared"
 	"fmt"
 	"net"
@@ -67,6 +68,26 @@ type capturingCommandRunner struct {
 	t *testing.T
 }
 
+// commandTimeout bounds every restic invocation this runner makes. It must
+// stay well under restic's own backend retry ceiling — confirmed against
+// restic 0.19.1's internal/global/global.go, every backend is wrapped in
+// retry.New(be, 15*time.Minute, ...), and that 15-minute
+// exponential-backoff retry budget is hardcoded at that call site with no
+// CLI flag or env var to shorten it (--stuck-request-timeout, default 5m,
+// is a different thing: it only covers requests that never receive a
+// response at all, not requests that fail fast and get retried, which is
+// what happens here). Without this timeout, a persistent-looking backend
+// error — e.g. TestIntegration_Azure's known, permanent Azurite TLS
+// mismatch (see isKnownAzuriteAddressingIncompatibility) — makes restic
+// retry for up to 15 minutes before ever returning control to Go, which
+// reads as a hung test rather than the graceful, fast skip the test
+// actually implements. restic logs each retry attempt's error to
+// stdout/stderr as it happens (confirmed directly: a first attempt errors
+// within ~1s), so the known-incompatibility signature is already present
+// in the captured output long before this timeout fires, letting the test
+// still recognize and skip it — just without waiting 15 minutes to do so.
+const commandTimeout = 60 * time.Second
+
 func (r capturingCommandRunner) Run(name string, args ...string) error {
 	return r.RunInDirWithEnv("", nil, name, args...)
 }
@@ -80,7 +101,10 @@ func (r capturingCommandRunner) LookPath(file string) (string, error) {
 }
 
 func (r capturingCommandRunner) RunInDirWithEnv(dir string, env []string, name string, args ...string) error {
-	cmd := exec.Command(name, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, name, args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -101,7 +125,10 @@ func (r capturingCommandRunner) RunInDirWithEnv(dir string, env []string, name s
 }
 
 func (r capturingCommandRunner) OutputWithEnv(env []string, name string, args ...string) ([]byte, error) {
-	cmd := exec.Command(name, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = append(os.Environ(), env...)
 
 	var stdout, stderr bytes.Buffer

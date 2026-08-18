@@ -208,6 +208,25 @@ func TestLoggedCommandRunner_RunInDirWithEnvWritesToLogFileAndRunsInDir(t *testi
 	}
 }
 
+func TestLoggedCommandRunner_RunInDirWithEnv_VerboseOptionPrintsCommandLine(t *testing.T) {
+	runner := LoggedCommandRunner{
+		LogFile: filepath.Join(t.TempDir(), "run.log"),
+		Options: &Options{Verbose: true},
+	}
+
+	if err := runner.RunInDirWithEnv("", nil, "sh", "-c", "true"); err != nil {
+		t.Fatalf("RunInDirWithEnv returned error: %v", err)
+	}
+}
+
+func TestLoggedCommandRunner_RunInDirWithEnv_ReturnsErrorWhenLogFileCannotBeOpened(t *testing.T) {
+	runner := LoggedCommandRunner{LogFile: filepath.Join(t.TempDir(), "does-not-exist", "run.log")}
+
+	if err := runner.RunInDirWithEnv("", nil, "sh", "-c", "true"); err == nil {
+		t.Fatal("expected an error when the log file cannot be opened")
+	}
+}
+
 func TestLoggedCommandRunner_OutputWithEnvDelegatesToWrappedRunner(t *testing.T) {
 	runner := LoggedCommandRunner{LogFile: filepath.Join(t.TempDir(), "run.log")}
 

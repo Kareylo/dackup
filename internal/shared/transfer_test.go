@@ -170,6 +170,53 @@ func TestTransferService_Run_SkipsDuplicatePathsAndEmptyConfigs(t *testing.T) {
 	}
 }
 
+func TestTransferService_Run_SkipsEmptyConfiguredPath(t *testing.T) {
+	runner := &fakeTransferRunner{}
+	srcRoot := t.TempDir()
+	dstRoot := t.TempDir()
+
+	service := TransferService{
+		Direction: TransferBackup,
+		SourceDir: srcRoot,
+		DestDir:   dstRoot,
+		FS:        fakeTransferFS{},
+		Runner:    runner,
+		Logger:    &fakeTransferLogger{},
+		Paths:     PathResolver{SourceRoot: srcRoot, DestinationRoot: dstRoot},
+	}
+
+	configs := []ContainerConfig{{Container: "a", Paths: []string{"/"}}}
+
+	if err := service.Run(configs); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	if len(runner.ranCommands) != 0 {
+		t.Fatalf("expected an empty configured path to be skipped, got %#v", runner.ranCommands)
+	}
+}
+
+func TestTransferService_Run_PropagatesSinglePathError(t *testing.T) {
+	srcRoot := t.TempDir()
+	dstRoot := t.TempDir()
+
+	service := TransferService{
+		Direction: TransferBackup,
+		SourceDir: srcRoot,
+		DestDir:   dstRoot,
+		FS:        fakeTransferFS{mkdirAllErr: fmt.Errorf("permission denied")},
+		Runner:    &fakeTransferRunner{},
+		Logger:    &fakeTransferLogger{},
+		Paths:     PathResolver{SourceRoot: srcRoot, DestinationRoot: dstRoot},
+	}
+
+	configs := []ContainerConfig{{Container: "a", Paths: []string{"/app"}}}
+
+	if err := service.Run(configs); err == nil {
+		t.Fatal("expected Run to propagate a failing path's error")
+	}
+}
+
 func TestTransferService_FixBackupOwnership_DryRunSkipsChown(t *testing.T) {
 	runner := &fakeTransferRunner{}
 	service := TransferService{
@@ -275,5 +322,106 @@ func TestTransferService_FixRestoreOwnership_FailureReturnsError(t *testing.T) {
 
 	if err := service.FixRestoreOwnership(configs, "user", "group"); err == nil {
 		t.Fatal("expected an error when chown fails")
+	}
+}
+
+func TestTransferService_fileSystem_DefaultsToOSFileSystem(t *testing.T) {
+	service := TransferService{}
+
+	if _, ok := service.fileSystem().(OSFileSystem); !ok {
+		t.Fatalf("expected default file system to be OSFileSystem, got %T", service.fileSystem())
+	}
+}
+
+func TestTransferService_fileSystem_UsesConfiguredFS(t *testing.T) {
+	fs := fakeTransferFS{}
+	service := TransferService{FS: fs}
+
+	if service.fileSystem() != FileSystem(fs) {
+		t.Fatal("expected the configured FS to be returned unchanged")
+	}
+}
+
+func TestTransferService_commandRunner_DefaultsToOSCommandRunner(t *testing.T) {
+	service := TransferService{}
+
+	if _, ok := service.commandRunner().(OSCommandRunner); !ok {
+		t.Fatalf("expected default command runner to be OSCommandRunner, got %T", service.commandRunner())
+	}
+}
+
+func TestTransferService_commandRunner_UsesConfiguredRunner(t *testing.T) {
+	runner := &fakeTransferRunner{}
+	service := TransferService{Runner: runner}
+
+	if service.commandRunner() != CommandRunner(runner) {
+		t.Fatal("expected the configured runner to be returned unchanged")
+	}
+}
+
+func TestTransferService_logger_DefaultsToFileLogger(t *testing.T) {
+	service := TransferService{LogFile: filepath.Join(t.TempDir(), "transfer.log")}
+
+	if _, ok := service.logger().(FileLogger); !ok {
+		t.Fatalf("expected default logger to be FileLogger, got %T", service.logger())
+	}
+}
+
+func TestTransferService_logger_UsesConfiguredLogger(t *testing.T) {
+	logger := &fakeTransferLogger{}
+	service := TransferService{Logger: logger}
+
+	if service.logger() != Logger(logger) {
+		t.Fatal("expected the configured logger to be returned unchanged")
+	}
+}
+
+func TestTransferService_pathResolver_DefaultsToSourceAndDestDir(t *testing.T) {
+	service := TransferService{SourceDir: "/data", DestDir: "/staging"}
+
+	want := PathResolver{SourceRoot: "/data", DestinationRoot: "/staging"}
+	if got := service.pathResolver(); got != want {
+		t.Fatalf("expected %#v, got %#v", want, got)
+	}
+}
+
+func TestTransferService_pathResolver_UsesConfiguredPaths(t *testing.T) {
+	configured := PathResolver{SourceRoot: "/configured-src", DestinationRoot: "/configured-dst"}
+	service := TransferService{SourceDir: "/data", DestDir: "/staging", Paths: configured}
+
+	if got := service.pathResolver(); got != configured {
+		t.Fatalf("expected %#v, got %#v", configured, got)
+	}
+}
+
+func TestTransferService_DirectionWording_Restore(t *testing.T) {
+	service := TransferService{Direction: TransferRestore}
+
+	if got := service.progressVerb(); got != "Restoring" {
+		t.Fatalf("expected progressVerb %q, got %q", "Restoring", got)
+	}
+
+	if got := service.pastTenseAction(); got != "restored" {
+		t.Fatalf("expected pastTenseAction %q, got %q", "restored", got)
+	}
+
+	if got := service.titleAction(); got != "Restore" {
+		t.Fatalf("expected titleAction %q, got %q", "Restore", got)
+	}
+}
+
+func TestTransferService_DirectionWording_Backup(t *testing.T) {
+	service := TransferService{Direction: TransferBackup}
+
+	if got := service.progressVerb(); got != "Backing up" {
+		t.Fatalf("expected progressVerb %q, got %q", "Backing up", got)
+	}
+
+	if got := service.pastTenseAction(); got != "backed up" {
+		t.Fatalf("expected pastTenseAction %q, got %q", "backed up", got)
+	}
+
+	if got := service.titleAction(); got != "Backup" {
+		t.Fatalf("expected titleAction %q, got %q", "Backup", got)
 	}
 }
