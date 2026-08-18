@@ -12,7 +12,8 @@
     "azure": {
       "container": "dackup-test",
       "account_name": "devstoreaccount1",
-      "encrypted_account_key": "v1:IbG5+9dz3+mbA6byxKQhgvYKTjg8umEgrC9uLdNnv5PCXM1xQ47zqs+3A9FLBGIYTwQXXTO8o/JqI5tmvhh0NHtTZgcN5Nh6yy0vODpji7kqafpEeJlDK5lsG7OEDAyBa6R8pz9T+Kj7ow/ZHtZk4lSd+k8="
+      "encrypted_account_key": "v1:IbG5+9dz3+mbA6byxKQhgvYKTjg8umEgrC9uLdNnv5PCXM1xQ47zqs+3A9FLBGIYTwQXXTO8o/JqI5tmvhh0NHtTZgcN5Nh6yy0vODpji7kqafpEeJlDK5lsG7OEDAyBa6R8pz9T+Kj7ow/ZHtZk4lSd+k8=",
+      "endpoint_suffix": "localhost:10000"
     }
   },
   "containers": [

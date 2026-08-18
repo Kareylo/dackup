@@ -25,10 +25,15 @@ import (
 //
 //   - keyfile_path: the fixture's own relative path would resolve against
 //     the JSON file's own location if taken literally, not against restic's
-//     working directory when it runs, so this points it at the committed
-//     throwaway keypair (test/restic_sftp_key/) via
-//     restic.IntegrationConfigPath instead — mirrors why kopia's own sftp
-//     integration test does the same for known_hosts_path.
+//     working directory when it runs, so this points it at a copy of the
+//     committed throwaway keypair (test/restic_sftp_key/) rather than the
+//     checked-out file directly — git only tracks the executable bit, not
+//     arbitrary POSIX permissions, so a fresh checkout restores it as 0644
+//     regardless of what's committed, and ssh refuses to use a private key
+//     world/group-readable like that ("Permissions 0644 ... are too open").
+//     Copying it into a fresh t.TempDir() file with 0o600 sidesteps that;
+//     mirrors why kopia's own sftp integration test does the same
+//     restic.IntegrationConfigPath-based override for known_hosts_path.
 //   - known_hosts_path: test_restic_sftp's host key is regenerated on every
 //     "docker compose up" (atmoz/sftp doesn't persist it across restarts
 //     unless a volume is mounted for /etc/ssh), so this fetches the live
@@ -52,8 +57,18 @@ func TestIntegration_SFTP(t *testing.T) {
 		t.Fatalf("failed to write known_hosts file: %v", err)
 	}
 
+	keyBytes, err := os.ReadFile(restic.IntegrationConfigPath("restic_sftp_key/id_ed25519"))
+	if err != nil {
+		t.Fatalf("failed to read committed sftp private key: %v", err)
+	}
+
+	keyfilePath := filepath.Join(t.TempDir(), "id_ed25519")
+	if err := os.WriteFile(keyfilePath, keyBytes, 0o600); err != nil {
+		t.Fatalf("failed to write sftp private key: %v", err)
+	}
+
 	config := restic.LoadIntegrationConfig(t, "config.restic-sftp.json")
-	config.SFTP.KeyfilePath = restic.IntegrationConfigPath("restic_sftp_key/id_ed25519")
+	config.SFTP.KeyfilePath = keyfilePath
 	config.SFTP.KnownHostsPath = knownHostsPath
 
 	backend := restic.NewIntegrationBackend(t, config)

@@ -50,6 +50,19 @@ func TestStorage_BuildInvocation(t *testing.T) {
 	}
 }
 
+func TestStorage_BuildInvocation_EndpointSuffix(t *testing.T) {
+	s := Storage{Container: "my-container", AccountName: "myaccount", EncryptedAccountKey: "enc:storagekey", EndpointSuffix: "localhost:10000"}
+
+	invocation, err := s.BuildInvocation("global", fakeSecretStore{})
+	if err != nil {
+		t.Fatalf("BuildInvocation returned error: %v", err)
+	}
+
+	if !containsEnv(invocation.Env, "AZURE_ENDPOINT_SUFFIX=localhost:10000") {
+		t.Fatalf("expected endpoint suffix in env, got %v", invocation.Env)
+	}
+}
+
 func containsEnv(env []string, want string) bool {
 	for _, value := range env {
 		if value == want {

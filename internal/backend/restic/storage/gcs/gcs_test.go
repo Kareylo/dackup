@@ -58,6 +58,10 @@ func TestStorage_BuildInvocation_EmulatorHost(t *testing.T) {
 	if !containsEnv(invocation.Env, "STORAGE_EMULATOR_HOST=localhost:4443") {
 		t.Fatalf("expected emulator host in env, got %v", invocation.Env)
 	}
+
+	if !containsEnv(invocation.Env, "GOOGLE_ACCESS_TOKEN="+dummyEmulatorAccessToken) {
+		t.Fatalf("expected dummy access token in env, got %v", invocation.Env)
+	}
 }
 
 func containsEnv(env []string, want string) bool {
