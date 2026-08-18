@@ -3,6 +3,7 @@ package backend
 import (
 	"dackup/internal/backend/borg"
 	"dackup/internal/backend/kopia"
+	"dackup/internal/backend/restic"
 	"testing"
 )
 
@@ -18,7 +19,7 @@ func TestParseSettings_EmptyNameReturnsNil(t *testing.T) {
 }
 
 func TestParseSettings_UnknownNameReturnsError(t *testing.T) {
-	_, err := ParseSettings("restic", []byte(`{}`))
+	_, err := ParseSettings("unknown", []byte(`{}`))
 	if err == nil {
 		t.Fatal("expected error for unknown backend name, got nil")
 	}
@@ -49,6 +50,22 @@ func TestParseSettings_KopiaReturnsParsedConfig(t *testing.T) {
 	config, ok := got.(kopia.Config)
 	if !ok {
 		t.Fatalf("expected kopia.Config, got %#v", got)
+	}
+
+	if config.EncryptedPassword != "enc:secret" {
+		t.Fatalf("expected encrypted_password %q, got %q", "enc:secret", config.EncryptedPassword)
+	}
+}
+
+func TestParseSettings_ResticReturnsParsedConfig(t *testing.T) {
+	got, err := ParseSettings("restic", []byte(`{"encrypted_password":"enc:secret"}`))
+	if err != nil {
+		t.Fatalf("ParseSettings returned error: %v", err)
+	}
+
+	config, ok := got.(restic.Config)
+	if !ok {
+		t.Fatalf("expected restic.Config, got %#v", got)
 	}
 
 	if config.EncryptedPassword != "enc:secret" {

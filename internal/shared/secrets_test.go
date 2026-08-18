@@ -1,10 +1,63 @@
 package shared
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// fakeSecretFileSystem lets secrets_test.go inject failures at each step of
+// loadOrCreateKey/readKey/createKey that a real OSFileSystem can't easily
+// trigger on demand. OpenFile delegates to the real os package (so callers
+// get a real *os.File, matching the FileSystem interface), but when
+// closeOpenedFile is set it immediately closes the file it just opened
+// before returning it, so any Read/Write the caller does next fails with
+// "file already closed" — a reliable way to exercise readKey's io.ReadAll
+// error branch and createKey's WriteString error branch without a custom
+// io.Writer/io.Reader (FileSystem.OpenFile returns a concrete *os.File, not
+// an interface).
+type fakeSecretFileSystem struct {
+	statErr  error
+	mkdirErr error
+	openErr  error
+
+	closeOpenedFile bool
+}
+
+func (fs fakeSecretFileSystem) Stat(name string) (os.FileInfo, error) {
+	if fs.statErr != nil {
+		return nil, fs.statErr
+	}
+
+	return os.Stat(name)
+}
+
+func (fs fakeSecretFileSystem) MkdirAll(path string, perm os.FileMode) error {
+	if fs.mkdirErr != nil {
+		return fs.mkdirErr
+	}
+
+	return os.MkdirAll(path, perm)
+}
+
+func (fs fakeSecretFileSystem) OpenFile(name string, flag int, perm os.FileMode) (*os.File, error) {
+	if fs.openErr != nil {
+		return nil, fs.openErr
+	}
+
+	file, err := os.OpenFile(name, flag, perm)
+	if err != nil {
+		return nil, err
+	}
+
+	if fs.closeOpenedFile {
+		file.Close()
+	}
+
+	return file, nil
+}
 
 func TestAESFileSecretStore_EncryptDecryptRoundTrip(t *testing.T) {
 	store := AESFileSecretStore{
@@ -130,5 +183,130 @@ func TestDefaultSecretKeyPath(t *testing.T) {
 
 	if !strings.HasSuffix(path, DefaultSecretKeyRelativePath) {
 		t.Fatalf("expected path to end with %q, got %q", DefaultSecretKeyRelativePath, path)
+	}
+}
+
+func TestDefaultSecretKeyPath_PropagatesErrorWhenHomeDirIsUnknown(t *testing.T) {
+	t.Setenv("HOME", "")
+
+	if _, err := DefaultSecretKeyPath(); err == nil {
+		t.Fatal("expected an error when the home directory can't be determined")
+	}
+}
+
+func TestAESFileSecretStore_Encrypt_PropagatesKeyPathError(t *testing.T) {
+	t.Setenv("HOME", "")
+
+	// An empty KeyPath falls back to DefaultSecretKeyPath, which fails
+	// without a resolvable home directory.
+	store := AESFileSecretStore{}
+
+	if _, err := store.Encrypt("value"); err == nil {
+		t.Fatal("expected an error when the key path can't be determined")
+	}
+}
+
+func TestAESFileSecretStore_Decrypt_PropagatesCipherError(t *testing.T) {
+	t.Setenv("HOME", "")
+
+	store := AESFileSecretStore{}
+
+	if _, err := store.Decrypt(secretEncodingPrefix + "QQ=="); err == nil {
+		t.Fatal("expected an error when the key path can't be determined")
+	}
+}
+
+func TestAESFileSecretStore_Decrypt_RejectsInvalidBase64(t *testing.T) {
+	store := AESFileSecretStore{KeyPath: filepath.Join(t.TempDir(), "secret.key")}
+
+	if _, err := store.Decrypt(secretEncodingPrefix + "not-valid-base64!!!"); err == nil {
+		t.Fatal("expected an error for invalid base64 ciphertext")
+	}
+}
+
+func TestAESFileSecretStore_Decrypt_RejectsCiphertextShorterThanNonce(t *testing.T) {
+	store := AESFileSecretStore{KeyPath: filepath.Join(t.TempDir(), "secret.key")}
+
+	// A single encoded byte can never contain a full GCM nonce.
+	if _, err := store.Decrypt(secretEncodingPrefix + "QQ=="); err == nil {
+		t.Fatal("expected an error for ciphertext shorter than the nonce size")
+	}
+}
+
+func TestAESFileSecretStore_ReadKey_RejectsMalformedKeyFile(t *testing.T) {
+	keyPath := filepath.Join(t.TempDir(), "secret.key")
+	if err := os.WriteFile(keyPath, []byte("not a valid key"), 0o600); err != nil {
+		t.Fatalf("failed to write malformed key file: %v", err)
+	}
+
+	store := AESFileSecretStore{KeyPath: keyPath}
+
+	if _, err := store.Encrypt("value"); err == nil {
+		t.Fatal("expected an error for a malformed key file")
+	}
+}
+
+func TestAESFileSecretStore_LoadOrCreateKey_ReadKeyOpenFileError(t *testing.T) {
+	keyPath := filepath.Join(t.TempDir(), "secret.key")
+	if err := os.WriteFile(keyPath, []byte("irrelevant"), 0o600); err != nil {
+		t.Fatalf("failed to write key file: %v", err)
+	}
+
+	store := AESFileSecretStore{
+		KeyPath: keyPath,
+		FS:      fakeSecretFileSystem{openErr: fmt.Errorf("permission denied")},
+	}
+
+	if _, err := store.Encrypt("value"); err == nil {
+		t.Fatal("expected an error when opening the existing key file fails")
+	}
+}
+
+func TestAESFileSecretStore_LoadOrCreateKey_ReadKeyReadError(t *testing.T) {
+	keyPath := filepath.Join(t.TempDir(), "secret.key")
+	if err := os.WriteFile(keyPath, []byte("irrelevant"), 0o600); err != nil {
+		t.Fatalf("failed to write key file: %v", err)
+	}
+
+	store := AESFileSecretStore{
+		KeyPath: keyPath,
+		FS:      fakeSecretFileSystem{closeOpenedFile: true},
+	}
+
+	if _, err := store.Encrypt("value"); err == nil {
+		t.Fatal("expected an error when reading the existing key file fails")
+	}
+}
+
+func TestAESFileSecretStore_LoadOrCreateKey_CreateKeyMkdirError(t *testing.T) {
+	store := AESFileSecretStore{
+		KeyPath: filepath.Join(t.TempDir(), "nested", "secret.key"),
+		FS:      fakeSecretFileSystem{mkdirErr: fmt.Errorf("permission denied")},
+	}
+
+	if _, err := store.Encrypt("value"); err == nil {
+		t.Fatal("expected an error when the key directory can't be created")
+	}
+}
+
+func TestAESFileSecretStore_LoadOrCreateKey_CreateKeyOpenFileError(t *testing.T) {
+	store := AESFileSecretStore{
+		KeyPath: filepath.Join(t.TempDir(), "secret.key"),
+		FS:      fakeSecretFileSystem{openErr: fmt.Errorf("permission denied")},
+	}
+
+	if _, err := store.Encrypt("value"); err == nil {
+		t.Fatal("expected an error when the new key file can't be created")
+	}
+}
+
+func TestAESFileSecretStore_LoadOrCreateKey_CreateKeyWriteError(t *testing.T) {
+	store := AESFileSecretStore{
+		KeyPath: filepath.Join(t.TempDir(), "secret.key"),
+		FS:      fakeSecretFileSystem{closeOpenedFile: true},
+	}
+
+	if _, err := store.Encrypt("value"); err == nil {
+		t.Fatal("expected an error when writing the new key file fails")
 	}
 }

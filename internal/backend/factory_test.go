@@ -4,6 +4,7 @@ import (
 	"dackup/internal/backend/borg"
 	"dackup/internal/backend/default"
 	"dackup/internal/backend/kopia"
+	"dackup/internal/backend/restic"
 	"testing"
 )
 
@@ -23,7 +24,7 @@ func TestFactory_GetBackend_EmptyNameReturnsDefaultBackend(t *testing.T) {
 func TestFactory_GetBackend_UnknownNameReturnsError(t *testing.T) {
 	factory := Factory{}
 
-	_, err := factory.GetBackend("restic", nil)
+	_, err := factory.GetBackend("unknown", nil)
 	if err == nil {
 		t.Fatal("expected error for unknown backend name, got nil")
 	}
@@ -98,5 +99,41 @@ func TestFactory_GetBackend_KopiaWithValidSettingsReturnsKopiaBackend(t *testing
 
 	if kopiaBackend.ReposRoot != "/mnt/backup/kopia-repos" {
 		t.Fatalf("expected ReposRoot %q, got %q", "/mnt/backup/kopia-repos", kopiaBackend.ReposRoot)
+	}
+}
+
+func TestFactory_GetBackend_ResticWithoutBackendDirReturnsError(t *testing.T) {
+	factory := Factory{}
+
+	_, err := factory.GetBackend(restic.Name, []byte(`{"encrypted_password":"enc:secret"}`))
+	if err == nil {
+		t.Fatal("expected error when backend_dir is not set")
+	}
+}
+
+func TestFactory_GetBackend_ResticWithInvalidSettingsReturnsError(t *testing.T) {
+	factory := Factory{BackendDir: "/mnt/backup/restic-repos"}
+
+	_, err := factory.GetBackend(restic.Name, []byte(`{}`))
+	if err == nil {
+		t.Fatal("expected error when encrypted_password is not set")
+	}
+}
+
+func TestFactory_GetBackend_ResticWithValidSettingsReturnsResticBackend(t *testing.T) {
+	factory := Factory{BackendDir: "/mnt/backup/restic-repos"}
+
+	got, err := factory.GetBackend(restic.Name, []byte(`{"encrypted_password":"enc:secret"}`))
+	if err != nil {
+		t.Fatalf("GetBackend returned error: %v", err)
+	}
+
+	resticBackend, ok := got.(restic.Backend)
+	if !ok {
+		t.Fatalf("expected restic.Backend, got %#v", got)
+	}
+
+	if resticBackend.ReposRoot != "/mnt/backup/restic-repos" {
+		t.Fatalf("expected ReposRoot %q, got %q", "/mnt/backup/restic-repos", resticBackend.ReposRoot)
 	}
 }

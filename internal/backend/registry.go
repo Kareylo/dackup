@@ -3,6 +3,7 @@ package backend
 import (
 	"dackup/internal/backend/borg"
 	"dackup/internal/backend/kopia"
+	"dackup/internal/backend/restic"
 )
 
 // AvailableBackends lists the names of concrete backends that can be
@@ -11,5 +12,5 @@ import (
 // registering its name here plus adding one case each to ParseSettings and
 // Factory.GetBackend.
 func AvailableBackends() []string {
-	return []string{borg.Name, kopia.Name}
+	return []string{borg.Name, kopia.Name, restic.Name}
 }

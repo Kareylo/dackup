@@ -16,8 +16,8 @@ help:
 	@echo "  make deps-install        Install missing dependencies (uses sudo)"
 	@echo "  make build               Build $(APP_NAME)"
 	@echo "  make test                Run tests"
-	@echo "  make test-integration    Start test/compose.yml and run kopia storage + borg integration tests"
-	@echo "  make test-integration-docker  Same, but build+run inside test/Dockerfile (pinned borg/kopia, no host install needed)"
+	@echo "  make test-integration    Start test/compose.yml and run kopia/restic storage + borg integration tests"
+	@echo "  make test-integration-docker  Same, but build+run inside test/Dockerfile (pinned borg/kopia/restic, no host install needed)"
 	@echo "  make test-integration-down  Stop the containers started by test-integration"
 	@echo "  make install             Build and install $(APP_NAME) to $(INSTALL_BIN)"
 	@echo "  make uninstall           Remove $(INSTALL_BIN)"
@@ -124,7 +124,7 @@ test-integration: deps
 			exit 1; \
 		fi; \
 	done
-	@echo "Running kopia storage and borg integration tests..."
+	@echo "Running kopia/restic storage and borg integration tests..."
 	$(GO) test -tags=integration -cover ./...
 
 .PHONY: test-integration-docker
@@ -143,7 +143,7 @@ test-integration-docker:
 			exit 1; \
 		fi; \
 	done
-	@echo "Building dackup and running kopia storage + borg integration tests inside test/Dockerfile..."
+	@echo "Building dackup and running kopia/restic storage + borg integration tests inside test/Dockerfile..."
 	docker compose -f test/compose.yml --profile docker-tests run --rm test_dackup
 
 .PHONY: test-integration-down

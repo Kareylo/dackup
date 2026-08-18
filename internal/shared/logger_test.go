@@ -47,3 +47,10 @@ func TestFileLogger_Log_InvalidLogFilePathDoesNotPanic(t *testing.T) {
 
 	logger.Log("ERROR", "should not panic even though the directory does not exist")
 }
+
+func TestFileLogger_Log_WriteFailureDoesNotPanic(t *testing.T) {
+	logFile := filepath.Join(t.TempDir(), "dackup.log")
+	logger := FileLogger{LogFile: logFile, FS: fakeSecretFileSystem{closeOpenedFile: true}}
+
+	logger.Log("ERROR", "should not panic when the log file can't be written to")
+}

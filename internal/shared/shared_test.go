@@ -9,6 +9,217 @@ import (
 	"testing"
 )
 
+func TestDefaultDackupConfigPath_JoinsHomeDirAndDefaultRelativePath(t *testing.T) {
+	t.Setenv("HOME", "/home/dackup-test-user")
+
+	got, err := DefaultDackupConfigPath()
+	if err != nil {
+		t.Fatalf("DefaultDackupConfigPath returned error: %v", err)
+	}
+
+	want := filepath.Join("/home/dackup-test-user", DefaultConfigRelativePath)
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestDefaultDackupConfigPath_PropagatesErrorWhenHomeDirIsUnknown(t *testing.T) {
+	t.Setenv("HOME", "")
+
+	if _, err := DefaultDackupConfigPath(); err == nil {
+		t.Fatal("expected an error when the home directory can't be determined")
+	}
+}
+
+func TestReadDackupConfig_MissingFileReturnsError(t *testing.T) {
+	if _, err := ReadDackupConfig(filepath.Join(t.TempDir(), "missing.json")); err == nil {
+		t.Fatal("expected an error for a missing config file")
+	}
+}
+
+func TestReadDackupConfig_MalformedJSONReturnsError(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(configPath, []byte("{not valid json"), 0o600); err != nil {
+		t.Fatalf("failed to write malformed config: %v", err)
+	}
+
+	if _, err := ReadDackupConfig(configPath); err == nil {
+		t.Fatal("expected an error for a malformed config file")
+	}
+}
+
+func TestWriteDackupConfig_DryRunDoesNotTouchDisk(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+
+	err := WriteDackupConfig(configPath, DackupConfig{User: "user"}, &Options{DryRun: true})
+	if err != nil {
+		t.Fatalf("WriteDackupConfig returned error: %v", err)
+	}
+
+	if FileExists(configPath) {
+		t.Fatal("expected dry-run to not write the config file")
+	}
+}
+
+func TestWriteDackupConfig_DryRunMarshalFailureReturnsError(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+
+	// json.MarshalIndent re-parses the encoded output to indent it, so
+	// invalid raw bytes here (json.RawMessage.MarshalJSON does not itself
+	// validate them) surface as a marshal error.
+	config := DackupConfig{BackendSettings: json.RawMessage("not valid json")}
+
+	err := WriteDackupConfig(configPath, config, &Options{DryRun: true})
+	if err == nil {
+		t.Fatal("expected an error when the config can't be marshaled")
+	}
+}
+
+func TestWriteDackupConfig_MarshalFailureReturnsError(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+
+	config := DackupConfig{BackendSettings: json.RawMessage("not valid json")}
+
+	err := WriteDackupConfig(configPath, config, nil)
+	if err == nil {
+		t.Fatal("expected an error when the config can't be marshaled")
+	}
+}
+
+func TestWriteDackupConfig_MkdirFailureReturnsError(t *testing.T) {
+	tempDir := t.TempDir()
+	blockerPath := filepath.Join(tempDir, "blocker")
+	if err := os.WriteFile(blockerPath, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("failed to write blocker file: %v", err)
+	}
+
+	configPath := filepath.Join(blockerPath, "subdir", "config.json")
+
+	if err := WriteDackupConfig(configPath, DackupConfig{User: "user"}, nil); err == nil {
+		t.Fatal("expected an error when the config directory can't be created")
+	}
+}
+
+func TestWriteDackupConfig_WriteFileFailureReturnsError(t *testing.T) {
+	// A path that is itself an existing directory can never be written to
+	// as a file.
+	configPath := t.TempDir()
+
+	if err := WriteDackupConfig(configPath, DackupConfig{User: "user"}, nil); err == nil {
+		t.Fatal("expected an error when the config path is a directory")
+	}
+}
+
+func TestReadContainerConfigsFromPath_ReturnsContainers(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	config := DackupConfig{Containers: []ContainerConfig{{Container: "web", ToStop: true}}}
+	if err := WriteDackupConfig(configPath, config, nil); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	got, err := ReadContainerConfigsFromPath(configPath)
+	if err != nil {
+		t.Fatalf("ReadContainerConfigsFromPath returned error: %v", err)
+	}
+
+	if !reflect.DeepEqual(got, config.Containers) {
+		t.Fatalf("expected %#v, got %#v", config.Containers, got)
+	}
+}
+
+func TestReadContainerConfigsFromPath_MissingFileReturnsError(t *testing.T) {
+	if _, err := ReadContainerConfigsFromPath(filepath.Join(t.TempDir(), "missing.json")); err == nil {
+		t.Fatal("expected an error for a missing config file")
+	}
+}
+
+func TestWriteContainerConfigsToPath_CreatesNewFileWhenNoneExists(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	containers := []ContainerConfig{{Container: "web", ToStop: true}}
+
+	if err := WriteContainerConfigsToPath(configPath, containers, nil); err != nil {
+		t.Fatalf("WriteContainerConfigsToPath returned error: %v", err)
+	}
+
+	got, err := ReadDackupConfig(configPath)
+	if err != nil {
+		t.Fatalf("ReadDackupConfig returned error: %v", err)
+	}
+
+	if !reflect.DeepEqual(got.Containers, containers) {
+		t.Fatalf("expected containers %#v, got %#v", containers, got.Containers)
+	}
+}
+
+func TestWriteContainerConfigsToPath_PreservesOtherExistingFields(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	existing := DackupConfig{
+		User:       "test-user",
+		Group:      "test-group",
+		Containers: []ContainerConfig{{Container: "old"}},
+	}
+	if err := WriteDackupConfig(configPath, existing, nil); err != nil {
+		t.Fatalf("failed to write existing config: %v", err)
+	}
+
+	newContainers := []ContainerConfig{{Container: "new", ToStop: true}}
+	if err := WriteContainerConfigsToPath(configPath, newContainers, nil); err != nil {
+		t.Fatalf("WriteContainerConfigsToPath returned error: %v", err)
+	}
+
+	got, err := ReadDackupConfig(configPath)
+	if err != nil {
+		t.Fatalf("ReadDackupConfig returned error: %v", err)
+	}
+
+	if got.User != existing.User || got.Group != existing.Group {
+		t.Fatalf("expected user/group to be preserved, got %+v", got)
+	}
+
+	if !reflect.DeepEqual(got.Containers, newContainers) {
+		t.Fatalf("expected containers %#v, got %#v", newContainers, got.Containers)
+	}
+}
+
+func TestWriteContainerConfigsToPath_MalformedExistingFileReturnsError(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(configPath, []byte("{not valid json"), 0o600); err != nil {
+		t.Fatalf("failed to write malformed config: %v", err)
+	}
+
+	err := WriteContainerConfigsToPath(configPath, []ContainerConfig{{Container: "web"}}, nil)
+	if err == nil {
+		t.Fatal("expected an error when the existing config file is malformed")
+	}
+}
+
+func TestFileExists(t *testing.T) {
+	tempDir := t.TempDir()
+	existingPath := filepath.Join(tempDir, "exists.json")
+	if err := os.WriteFile(existingPath, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	if !FileExists(existingPath) {
+		t.Fatal("expected FileExists to report true for an existing file")
+	}
+
+	if FileExists(filepath.Join(tempDir, "missing.json")) {
+		t.Fatal("expected FileExists to report false for a missing file")
+	}
+}
+
+func TestEffectiveContainersConfigPath_MalformedMainConfigReturnsError(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(configPath, []byte("{not valid json"), 0o600); err != nil {
+		t.Fatalf("failed to write malformed config: %v", err)
+	}
+
+	if _, err := EffectiveContainersConfigPath(configPath); err == nil {
+		t.Fatal("expected an error for a malformed main config file")
+	}
+}
+
 func TestWriteAndReadDackupConfig_BackendFields(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "config.json")

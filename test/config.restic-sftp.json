@@ -1,0 +1,47 @@
+{
+  "user": "appuser",
+  "group": "appgroup",
+  "data_dir": "./test/volumes",
+  "staging_dir": "./test/test_backups/in",
+  "backend_dir": "./test/test_backups/repo-restic",
+  "backend": "restic",
+  "backend_settings": {
+    "global_repo_name": "global",
+    "encrypted_password": "v1:77XYnrW7klBrebW6TUDMIwisatBeEAZ2MyvRqIrKnBEn3zWOeMOKVJJu8Jj02o8e/S/HKsWGmg==",
+    "storage_type": "sftp",
+    "sftp": {
+      "host": "localhost",
+      "port": 2223,
+      "username": "resticuser",
+      "path": "/upload"
+    }
+  },
+  "containers": [
+    {
+      "container": "test",
+      "to_stop": true,
+      "paths": [
+        "/data/test",
+        "/config/test"
+      ],
+      "contains": [
+        "test_db",
+        "test_broker"
+      ]
+    },
+    {
+      "container": "test_db",
+      "to_stop": true,
+      "paths": [
+        "/data/test_db"
+      ]
+    },
+    {
+      "container": "test_broker",
+      "to_stop": true,
+      "paths": [
+        "/data/test_broker"
+      ]
+    }
+  ]
+}

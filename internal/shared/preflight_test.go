@@ -91,6 +91,32 @@ func TestPreflightChecks_PassesWithValidFixture(t *testing.T) {
 	}
 }
 
+func TestPreflightChecks_NilFSAndRunnerDefaultToRealImplementations(t *testing.T) {
+	if _, err := (OSCommandRunner{}).LookPath("docker"); err != nil {
+		t.Skip("docker binary not found on PATH")
+	}
+	if _, err := (OSCommandRunner{}).LookPath("rsync"); err != nil {
+		t.Skip("rsync binary not found on PATH")
+	}
+
+	fixture := newPreflightFixture(t)
+
+	err := PreflightChecks(
+		"backup",
+		fixture.configPath,
+		fixture.config,
+		fixture.configs,
+		fixture.sourceRoot,
+		fixture.destRoot,
+		fixture.resolver,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("expected no error with nil fs/runner defaulting to real implementations, got %v", err)
+	}
+}
+
 func TestPreflightChecks_MissingConfigFileReturnsError(t *testing.T) {
 	fixture := newPreflightFixture(t)
 	fixture.configPath = filepath.Join(t.TempDir(), "missing.json")

@@ -1,0 +1,47 @@
+{
+  "user": "appuser",
+  "group": "appgroup",
+  "data_dir": "./test/volumes",
+  "staging_dir": "./test/test_backups/in",
+  "backend_dir": "./test/test_backups/repo-restic",
+  "backend": "restic",
+  "backend_settings": {
+    "global_repo_name": "global",
+    "encrypted_password": "v1:77XYnrW7klBrebW6TUDMIwisatBeEAZ2MyvRqIrKnBEn3zWOeMOKVJJu8Jj02o8e/S/HKsWGmg==",
+    "storage_type": "azure",
+    "azure": {
+      "container": "dackup-test",
+      "account_name": "devstoreaccount1",
+      "encrypted_account_key": "v1:IbG5+9dz3+mbA6byxKQhgvYKTjg8umEgrC9uLdNnv5PCXM1xQ47zqs+3A9FLBGIYTwQXXTO8o/JqI5tmvhh0NHtTZgcN5Nh6yy0vODpji7kqafpEeJlDK5lsG7OEDAyBa6R8pz9T+Kj7ow/ZHtZk4lSd+k8=",
+      "endpoint_suffix": "localhost:10000"
+    }
+  },
+  "containers": [
+    {
+      "container": "test",
+      "to_stop": true,
+      "paths": [
+        "/data/test",
+        "/config/test"
+      ],
+      "contains": [
+        "test_db",
+        "test_broker"
+      ]
+    },
+    {
+      "container": "test_db",
+      "to_stop": true,
+      "paths": [
+        "/data/test_db"
+      ]
+    },
+    {
+      "container": "test_broker",
+      "to_stop": true,
+      "paths": [
+        "/data/test_broker"
+      ]
+    }
+  ]
+}

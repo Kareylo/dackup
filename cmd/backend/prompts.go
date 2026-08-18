@@ -3,6 +3,7 @@ package backend
 import (
 	"dackup/internal/backend/borg"
 	"dackup/internal/backend/kopia"
+	"dackup/internal/backend/restic"
 	"encoding/json"
 	"fmt"
 )
@@ -191,6 +192,19 @@ func (service commandService) promptBackendSettings(name string, currentBackend 
 		}
 
 		return service.promptKopiaSettings(config)
+	case restic.Name:
+		config := restic.DefaultConfig()
+
+		if currentBackend == restic.Name && len(currentSettings) > 0 {
+			parsed, err := restic.ParseConfig(currentSettings)
+			if err != nil {
+				fmt.Printf("Warning: failed to load the current restic settings (%v); starting from defaults\n", err)
+			} else {
+				config = parsed
+			}
+		}
+
+		return service.promptResticSettings(config)
 	default:
 		return nil, nil
 	}
