@@ -6,46 +6,75 @@ INSTALL_BIN := $(INSTALL_DIR)/$(APP_NAME)
 
 GO ?= go
 GOFLAGS ?=
-LDFLAGS ?= -s -w
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS ?= -s -w -X dackup/cmd/version.Version=$(VERSION)
 
 .PHONY: help
 help:
 	@echo "Available targets:"
-	@echo "  make deps       Install required dependencies when possible"
-	@echo "  make build      Build $(APP_NAME)"
-	@echo "  make test       Run tests"
-	@echo "  make install    Build and install $(APP_NAME) to $(INSTALL_BIN)"
-	@echo "  make uninstall  Remove $(INSTALL_BIN)"
-	@echo "  make clean      Remove build artifacts"
+	@echo "  make deps                Check required dependencies are installed"
+	@echo "  make deps-install        Install missing dependencies (uses sudo)"
+	@echo "  make build               Build $(APP_NAME)"
+	@echo "  make test                Run tests"
+	@echo "  make test-integration    Start test/compose.yml and run kopia/restic storage + borg integration tests"
+	@echo "  make test-integration-docker  Same, but build+run inside test/Dockerfile (pinned borg/kopia/restic, no host install needed)"
+	@echo "  make test-integration-down  Stop the containers started by test-integration"
+	@echo "  make install             Build and install $(APP_NAME) to $(INSTALL_BIN)"
+	@echo "  make uninstall           Remove $(INSTALL_BIN)"
+	@echo "  make clean               Remove build artifacts"
 
 .PHONY: deps
 deps:
+	@echo "Checking dependencies..."
+	@if command -v go >/dev/null 2>&1; then \
+		echo "Go is already installed: $$(go version)"; \
+	else \
+		echo "Go is not installed."; \
+		echo "Run 'make deps-install' to install it (uses sudo), or install Go manually."; \
+		exit 1; \
+	fi
+	@if command -v rsync >/dev/null 2>&1; then \
+		echo "rsync is installed."; \
+	else \
+		echo "WARNING: rsync is not installed. Run 'make deps-install' or install it manually."; \
+	fi
+	@if command -v docker >/dev/null 2>&1; then \
+		echo "Docker CLI is installed."; \
+	else \
+		echo "WARNING: Docker CLI is not installed."; \
+		echo "Install Docker manually for backup/restore commands to work."; \
+	fi
+	@echo "Downloading Go module dependencies..."
+	$(GO) mod download
+
+.PHONY: deps-install
+deps-install:
 	@echo "Installing dependencies..."
 	@if command -v go >/dev/null 2>&1; then \
 		echo "Go is already installed: $$(go version)"; \
 	else \
 		echo "Go is not installed."; \
 		if command -v apt-get >/dev/null 2>&1; then \
-			echo "Using apt-get..."; \
+			echo "Using apt-get (sudo)..."; \
 			sudo apt-get update; \
 			sudo apt-get install -y golang-go rsync; \
 		elif command -v dnf >/dev/null 2>&1; then \
-			echo "Using dnf..."; \
+			echo "Using dnf (sudo)..."; \
 			sudo dnf install -y golang rsync; \
 		elif command -v yum >/dev/null 2>&1; then \
-			echo "Using yum..."; \
+			echo "Using yum (sudo)..."; \
 			sudo yum install -y golang rsync; \
 		elif command -v pacman >/dev/null 2>&1; then \
-			echo "Using pacman..."; \
+			echo "Using pacman (sudo)..."; \
 			sudo pacman -Sy --needed go rsync; \
 		elif command -v zypper >/dev/null 2>&1; then \
-			echo "Using zypper..."; \
+			echo "Using zypper (sudo)..."; \
 			sudo zypper install -y go rsync; \
 		elif command -v apk >/dev/null 2>&1; then \
-			echo "Using apk..."; \
+			echo "Using apk (sudo)..."; \
 			sudo apk add go rsync; \
 		elif command -v pkg >/dev/null 2>&1; then \
-			echo "Using pkg..."; \
+			echo "Using pkg (sudo)..."; \
 			sudo pkg install -y go rsync; \
 		elif command -v brew >/dev/null 2>&1; then \
 			echo "Using Homebrew..."; \
@@ -67,8 +96,6 @@ deps:
 		echo "WARNING: Docker CLI is not installed."; \
 		echo "Install Docker manually for backup/restore commands to work."; \
 	fi
-	@echo "Downloading Go module dependencies..."
-	$(GO) mod download
 
 .PHONY: build
 build: deps
@@ -79,7 +106,50 @@ build: deps
 
 .PHONY: test
 test: deps
-	$(GO) test ./...
+	$(GO) test -cover ./...
+
+.PHONY: test-integration
+test-integration: deps
+	@if ! command -v docker >/dev/null 2>&1; then \
+		echo "Docker is required for integration tests; see 'make deps'."; \
+		exit 1; \
+	fi
+	@echo "Starting test/compose.yml storage emulator containers..."
+	docker compose -f test/compose.yml up -d
+	@echo "Waiting for bucket/container setup to finish..."
+	@for svc in test_minio_init test_azurite_init test_gcs_init; do \
+		code=$$(docker wait $$svc); \
+		if [ "$$code" != "0" ]; then \
+			echo "$$svc failed (exit $$code); see: docker logs $$svc" >&2; \
+			exit 1; \
+		fi; \
+	done
+	@echo "Running kopia/restic storage and borg integration tests..."
+	$(GO) test -tags=integration -cover ./...
+
+.PHONY: test-integration-docker
+test-integration-docker:
+	@if ! command -v docker >/dev/null 2>&1; then \
+		echo "Docker is required for integration tests; see 'make deps'."; \
+		exit 1; \
+	fi
+	@echo "Starting test/compose.yml storage emulator containers..."
+	docker compose -f test/compose.yml up -d
+	@echo "Waiting for bucket/container setup to finish..."
+	@for svc in test_minio_init test_azurite_init test_gcs_init; do \
+		code=$$(docker wait $$svc); \
+		if [ "$$code" != "0" ]; then \
+			echo "$$svc failed (exit $$code); see: docker logs $$svc" >&2; \
+			exit 1; \
+		fi; \
+	done
+	@echo "Building dackup and running kopia/restic storage + borg integration tests inside test/Dockerfile..."
+	docker compose -f test/compose.yml --profile docker-tests run --rm test_dackup
+
+.PHONY: test-integration-down
+test-integration-down:
+	@echo "Stopping test/compose.yml containers..."
+	docker compose -f test/compose.yml down -v
 
 .PHONY: install
 install: build

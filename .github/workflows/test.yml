@@ -1,0 +1,71 @@
+name: test
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+
+jobs:
+  test:
+    name: Build, vet, and test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "The following files are not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: make build
+
+      - name: Test
+        run: make test
+
+      - name: Enforce coverage threshold
+        env:
+          THRESHOLD: "80"
+        run: |
+          go test -coverpkg=./... -coverprofile=coverage.out ./...
+          total=$(go tool cover -func=coverage.out | tail -1 | awk '{print $NF}' | tr -d '%')
+          echo "Total coverage (credited for cross-package calls): ${total}%"
+          awk -v total="$total" -v threshold="$THRESHOLD" 'BEGIN {
+            if (total + 0 < threshold + 0) {
+              printf "FAIL: coverage %.1f%% is below the %s%% threshold\n", total, threshold
+              exit 1
+            }
+            printf "OK: coverage %.1f%% meets the %s%% threshold\n", total, threshold
+          }'
+
+  integration-test:
+    name: Docker integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Build and run integration tests via test/Dockerfile
+        run: make test-integration-docker
+
+      - name: Stop compose containers
+        if: always()
+        run: make test-integration-down

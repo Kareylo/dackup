@@ -1,0 +1,47 @@
+{
+  "user": "appuser",
+  "group": "appgroup",
+  "data_dir": "./test/volumes",
+  "staging_dir": "./test/test_backups/in",
+  "backend_dir": "./test/test_backups/repo-kopia",
+  "backend": "kopia",
+  "backend_settings": {
+    "global_repo_name": "global",
+    "encrypted_password": "v1:eKz3kQJWLrj1XTCS+JmBCJWsI29TNHRDIBOGRVoytsVIAFu2R5nVCX4SwBnkU686cvBXi4KmOuYalcCV",
+    "storage_type": "azure",
+    "azure": {
+      "container": "dackup-test",
+      "storage_account": "devstoreaccount1",
+      "encrypted_storage_key": "v1:wjO5PPMFw6t9TBwkmWNO6w46xSCgoRlVdMCYmIAw1rXvwIlYg1YxUGiR7tJQd9xHfxvmbYtscVPe67EJvy9GavczMrko9NSV2mLuAJXm8YjAQnIa3Ias+H2/sNvcRU7z+L2+AFKm3uNinFaT0chQiRD1jKQ=",
+      "storage_domain": "localhost:10000"
+    }
+  },
+  "containers": [
+    {
+      "container": "test",
+      "to_stop": true,
+      "paths": [
+        "/data/test",
+        "/config/test"
+      ],
+      "contains": [
+        "test_db",
+        "test_broker"
+      ]
+    },
+    {
+      "container": "test_db",
+      "to_stop": true,
+      "paths": [
+        "/data/test_db"
+      ]
+    },
+    {
+      "container": "test_broker",
+      "to_stop": true,
+      "paths": [
+        "/data/test_broker"
+      ]
+    }
+  ]
+}

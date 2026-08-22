@@ -1,0 +1,271 @@
+services:
+  test:
+    image: busybox
+    container_name: test
+    command: ["sleep", "infinity"]
+    volumes:
+      - ./volumes/test_data:/config
+      - ./volumes/test_config:/config
+  test_db:
+    image: busybox
+    container_name: test_db
+    command: ["sleep", "infinity"]
+    volumes:
+      - ./volumes/test_db_data:/config
+  test_broker:
+    image: busybox
+    container_name: test_broker
+    command: ["sleep", "infinity"]
+    volumes:
+      - ./volumes/test_broker_data:/config
+  test_minio:
+    image: minio/minio
+    container_name: test_minio
+    # networks.default.aliases: "test_minio" (the service/container name)
+    # has an underscore, which isn't a valid DNS hostname per RFC 1123 —
+    # Docker's own internal resolver is lenient about it, but S3 clients
+    # like mc/MinIO's own tooling strictly validate hostnames and reject it
+    # ("Invalid Request (invalid hostname)"), so scripts/init-minio.sh (run
+    # from inside the docker network) addresses this container as "minio"
+    # instead.
+    networks:
+      default:
+        aliases:
+          - minio
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - test_minio_data:/data
+  # test_minio_init creates the "dackup-test" bucket kopia's s3 storage type
+  # expects (test/config.s3.json) — see scripts/init-minio.sh. It's a
+  # one-shot container (exits once the bucket exists), not a long-running
+  # service.
+  test_minio_init:
+    image: minio/mc
+    container_name: test_minio_init
+    depends_on:
+      - test_minio
+    volumes:
+      - ./scripts/init-minio.sh:/init.sh:ro
+    entrypoint: ["/bin/sh", "/init.sh"]
+    restart: "no"
+  # test_sftp_init chowns the test_sftp_upload volume to the sftp user
+  # (uid/gid 1000, matching test_sftp's "dackup:dackuppass:1000" command)
+  # before test_sftp starts. Docker creates a named volume's mount point
+  # owned by root:root by default; atmoz/sftp chroots and performs file
+  # operations as that uid, which can't write into a root-owned directory
+  # — this is what "cannot create path: permission denied" was.
+  test_sftp_init:
+    image: busybox
+    container_name: test_sftp_init
+    volumes:
+      - test_sftp_upload:/upload
+    entrypoint: ["/bin/sh", "-c", "chown -R 1000:1000 /upload"]
+    restart: "no"
+  test_sftp:
+    image: atmoz/sftp
+    container_name: test_sftp
+    depends_on:
+      test_sftp_init:
+        condition: service_completed_successfully
+    command: dackup:dackuppass:1000
+    ports:
+      - "2222:22"
+    volumes:
+      - test_sftp_upload:/home/dackup/upload
+  # test_webdav_init makes the test_webdav_data volume world-writable
+  # before test_webdav starts, for the same reason as test_sftp_init —
+  # bytemark/webdav's runtime user inside the container isn't confirmed,
+  # so this uses a permissive chmod rather than a specific chown.
+  test_webdav_init:
+    image: busybox
+    container_name: test_webdav_init
+    volumes:
+      - test_webdav_data:/dav
+    entrypoint: ["/bin/sh", "-c", "chmod -R 0777 /dav"]
+    restart: "no"
+  test_webdav:
+    image: bytemark/webdav
+    container_name: test_webdav
+    depends_on:
+      test_webdav_init:
+        condition: service_completed_successfully
+    environment:
+      - AUTH_TYPE=Basic
+      - USERNAME=dackup
+      - PASSWORD=dackuppass
+      - LOCATION=/
+    ports:
+      - "8080:80"
+    volumes:
+      - test_webdav_data:/var/lib/dav
+  test_azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    container_name: test_azurite
+    # networks.default.aliases: same underscore-in-hostname issue as
+    # test_minio above — test_azurite_init addresses this container as
+    # "azurite" instead.
+    networks:
+      default:
+        aliases:
+          - azurite
+    # --skipApiVersionCheck: the az CLI (mcr.microsoft.com/azure-cli, tracks
+    # latest) sends a newer x-ms-version header than this pinned Azurite
+    # image accepts by default, which Azurite otherwise rejects outright
+    # (InvalidHeaderValue) rather than just warning — this is Azurite's own
+    # documented escape hatch for exactly that mismatch, not a real
+    # incompatibility with anything dackup itself sends (kopia's own azure
+    # client is what actually matters for the real test).
+    command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --location /data --skipApiVersionCheck
+    ports:
+      - "10000:10000"
+      - "10001:10001"
+      - "10002:10002"
+    volumes:
+      - test_azurite_data:/data
+  # test_azurite_init creates the "dackup-test" container kopia's azure
+  # storage type expects (test/config.azure.json) — see
+  # scripts/init-azurite.sh.
+  test_azurite_init:
+    image: mcr.microsoft.com/azure-cli
+    container_name: test_azurite_init
+    depends_on:
+      - test_azurite
+    environment:
+      - AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;
+    volumes:
+      - ./scripts/init-azurite.sh:/init.sh:ro
+    entrypoint: ["/bin/sh", "/init.sh"]
+    restart: "no"
+  # test_gcs_init pre-creates the "dackup-test" bucket kopia's gcs storage
+  # type expects (test/config.gcs.json) before fake-gcs-server ever starts.
+  # With its filesystem backend, fake-gcs-server treats each top-level
+  # directory under its storage root as a bucket, so seeding the shared
+  # volume directly (rather than calling a bucket-creation API after
+  # startup, which would need its own readiness retry loop) is enough —
+  # test_gcs depends on this finishing first.
+  test_gcs_init:
+    image: busybox
+    container_name: test_gcs_init
+    volumes:
+      - test_gcs_data:/data
+    entrypoint: ["/bin/sh", "-c", "mkdir -p /data/dackup-test"]
+    restart: "no"
+  test_gcs:
+    image: fsouza/fake-gcs-server
+    container_name: test_gcs
+    depends_on:
+      test_gcs_init:
+        condition: service_completed_successfully
+    command: -scheme http -public-host localhost:4443 -backend filesystem -filesystem-root /data
+    ports:
+      - "4443:4443"
+    volumes:
+      - test_gcs_data:/data
+  # test_restic_sftp_init chowns the test_restic_sftp_upload volume to the
+  # sftp user (uid/gid 1000), same reason as test_sftp_init above. Kept as
+  # a separate container/volume from test_sftp rather than reused: restic's
+  # sftp backend only supports SSH key auth (see
+  # internal/backend/restic/storage/sftp's doc comment), unlike kopia's own
+  # sftp storage type, which this stack's existing test_sftp exercises with
+  # password auth — switching that container's auth mode would break
+  # kopia's own sftp integration test.
+  test_restic_sftp_init:
+    image: busybox
+    container_name: test_restic_sftp_init
+    volumes:
+      - test_restic_sftp_upload:/upload
+    entrypoint: ["/bin/sh", "-c", "chown -R 1000:1000 /upload"]
+    restart: "no"
+  # test_restic_sftp authenticates via the throwaway keypair committed at
+  # test/restic_sftp_key/ (never a real credential — generated solely for
+  # this test stack) rather than a password: atmoz/sftp's
+  # "user::uid" command form (empty password field) disables password
+  # login for that user, and the mounted *.pub file under
+  # ~/.ssh/keys/ is appended to its authorized_keys, per atmoz/sftp's own
+  # documented public-key setup.
+  test_restic_sftp:
+    image: atmoz/sftp
+    container_name: test_restic_sftp
+    depends_on:
+      test_restic_sftp_init:
+        condition: service_completed_successfully
+    command: resticuser::1000
+    ports:
+      - "2223:22"
+    volumes:
+      - test_restic_sftp_upload:/home/resticuser/upload
+      - ./restic_sftp_key/id_ed25519.pub:/home/resticuser/.ssh/keys/id_ed25519.pub:ro
+  # test_restic_rest is restic's own REST server (restic/rest-server),
+  # restic's closest analogue to kopia's WebDAV storage type — restic has
+  # no native WebDAV support, and kopia has no REST-protocol support, so
+  # neither backend's stack can reuse the other's server container here.
+  # DISABLE_AUTHENTICATION keeps this test instance open — the
+  # RESTIC_REST_USERNAME/RESTIC_REST_PASSWORD env-var path
+  # (storage/rest.Storage's authenticated branch) is covered by its own
+  # unit test instead of a live server.
+  test_restic_rest:
+    image: restic/rest-server:latest
+    container_name: test_restic_rest
+    environment:
+      - DISABLE_AUTHENTICATION=true
+    ports:
+      - "8010:8000"
+    volumes:
+      - test_restic_rest_data:/data
+  # test_dackup builds dackup and runs its full test suite (unit +
+  # //go:build integration) against pinned borg/kopia binaries inside
+  # test/Dockerfile, instead of on the host. network_mode: host (Linux
+  # only, matching this project's CI/dev targets) makes it reach the
+  # emulator services above the same way the host-executed
+  # `make test-integration` does — through their published localhost
+  # ports — without changing any of the integration tests' hardcoded
+  # "localhost:<port>" config. It's gated behind the "docker-tests"
+  # profile so a plain `docker compose up -d` (used by the host-executed
+  # `make test-integration`) doesn't also try to build and run it; see
+  # `make test-integration-docker`.
+  test_dackup:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile
+    container_name: test_dackup
+    network_mode: "host"
+    profiles: ["docker-tests"]
+    # Kept in sync with THRESHOLD in .github/workflows/test.yml's "test"
+    # job — both gate the same coverage number the same way, just for the
+    # unit-only vs. full (unit + integration) suite respectively.
+    environment:
+      - COVERAGE_THRESHOLD=80
+    depends_on:
+      test_minio_init:
+        condition: service_completed_successfully
+      test_azurite_init:
+        condition: service_completed_successfully
+      test_gcs:
+        condition: service_started
+      test_sftp:
+        condition: service_started
+      test_webdav:
+        condition: service_started
+      test_restic_sftp:
+        condition: service_started
+      test_restic_rest:
+        condition: service_started
+
+volumes:
+  test_data:
+  test_config:
+  test_db_data:
+  test_broker_data:
+  test_minio_data:
+  test_sftp_upload:
+  test_webdav_data:
+  test_azurite_data:
+  test_gcs_data:
+  test_restic_sftp_upload:
+  test_restic_rest_data:

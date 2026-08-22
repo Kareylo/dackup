@@ -1,12 +1,22 @@
 package cmd
 
-import "testing"
+import (
+	"dackup/cmd/backend"
+	"dackup/cmd/backup"
+	"dackup/cmd/config"
+	"dackup/cmd/restore"
+	"dackup/cmd/version"
+	"dackup/internal/shared"
+	"testing"
+)
 
 func TestRootCommandHasExpectedSubcommands(t *testing.T) {
 	expectedCommands := []string{
+		"backend",
 		"backup",
 		"restore",
 		"config",
+		"version",
 	}
 
 	for _, expectedCommand := range expectedCommands {
@@ -27,11 +37,35 @@ func TestRootCommandHasExpectedSubcommands(t *testing.T) {
 	}
 }
 
+func TestRootCommandVersionFlagUsesVersionPackage(t *testing.T) {
+	originalVersion := version.Version
+	version.Version = "9.9.9"
+	defer func() { version.Version = originalVersion }()
+
+	rootCmd.Version = version.Version
+
+	if rootCmd.Flags().Lookup("version") == nil {
+		rootCmd.InitDefaultVersionFlag()
+	}
+
+	if rootCmd.Version != "9.9.9" {
+		t.Fatalf("expected rootCmd.Version to be %q, got %q", "9.9.9", rootCmd.Version)
+	}
+
+	if rootCmd.Flags().Lookup("version") == nil {
+		t.Fatal("expected --version flag to be registered")
+	}
+}
+
 func TestConfigCommandHasExpectedSubcommands(t *testing.T) {
+	configCmd := config.NewCommand(&shared.Options{})
+
 	expectedCommands := []string{
 		"init",
 		"add",
 		"update",
+		"remove",
+		"list",
 		"use-file",
 	}
 
@@ -53,19 +87,62 @@ func TestConfigCommandHasExpectedSubcommands(t *testing.T) {
 	}
 }
 
+func TestBackendCommandHasExpectedSubcommands(t *testing.T) {
+	backendCmd := backend.NewCommand(&shared.Options{})
+
+	expectedCommands := []string{
+		"create",
+		"show",
+		"update",
+		"remove",
+	}
+
+	for _, expectedCommand := range expectedCommands {
+		t.Run(expectedCommand, func(t *testing.T) {
+			cmd, _, err := backendCmd.Find([]string{expectedCommand})
+			if err != nil {
+				t.Fatalf("backendCmd.Find returned error: %v", err)
+			}
+
+			if cmd == nil {
+				t.Fatalf("expected backend command %q to exist", expectedCommand)
+			}
+
+			if cmd.Name() != expectedCommand {
+				t.Fatalf("expected backend command %q, got %q", expectedCommand, cmd.Name())
+			}
+		})
+	}
+}
+
 func TestBackupCommandAcceptsArbitraryArgs(t *testing.T) {
+	backupCmd := backup.NewCommand(&shared.Options{})
+
 	if err := backupCmd.Args(backupCmd, []string{"paperless", "adguard"}); err != nil {
 		t.Fatalf("backup command should accept arbitrary args, got error: %v", err)
 	}
 }
 
 func TestRestoreCommandAcceptsArbitraryArgs(t *testing.T) {
+	restoreCmd := restore.NewCommand(&shared.Options{})
+
 	if err := restoreCmd.Args(restoreCmd, []string{"paperless", "adguard"}); err != nil {
 		t.Fatalf("restore command should accept arbitrary args, got error: %v", err)
 	}
 }
 
 func TestConfigUseFileRequiresOneArg(t *testing.T) {
+	configCmd := config.NewCommand(&shared.Options{})
+
+	configUseFileCmd, _, err := configCmd.Find([]string{"use-file"})
+	if err != nil {
+		t.Fatalf("configCmd.Find returned error: %v", err)
+	}
+
+	if configUseFileCmd == nil {
+		t.Fatal("expected use-file command to exist")
+	}
+
 	if err := configUseFileCmd.Args(configUseFileCmd, nil); err == nil {
 		t.Fatal("expected error with no args")
 	}

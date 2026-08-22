@@ -17,12 +17,42 @@ It can stop selected Docker containers, copy configured application directories,
 - Preview actions with `--dry-run`.
 - Enable command output with `--verbose`.
 
+## Workflow
+
+Backup stages data first, then restarts containers before handing off to the backup backend — so a slow backend never extends container downtime:
+
+```mermaid
+---
+title: Backup workflow
+---
+flowchart TD
+    A["Stop configured containers"] --> B["Stage data (rsync src -> dst)"]
+    B --> C["Fix backup ownership"]
+    C --> D["Restart stopped containers"]
+    D --> E["Backend.Backup(stagingDir)"]
+```
+
+Restore is the mirror image, but the backend runs *first* — it pulls data into the staging directory before any container is touched, so the actual downtime-critical stop/stage/start sequence only starts once that data is already on disk:
+
+```mermaid
+---
+title: Restore workflow
+---
+flowchart TD
+    A["Backend.Restore(stagingDir)"] --> B["Stop configured containers"]
+    B --> C["Stage data (rsync dst -> src)"]
+    C --> D["Fix restore ownership"]
+    D --> E["Restart stopped containers"]
+```
+
+The backend step is wired up (`dackup backend create`/`show`/`update`/`remove` manage it). Borg is the first concrete backend: with `backend: "borg"` configured, `backup` archives each container group (containers linked via `contains` share one repository) plus a full mirror into a separate global repository, both under `backend_dir`; `restore` extracts each group's latest archive back out. Leaving `backend` unset keeps the no-op default.
+
 ## Requirements
 
 - Go 1.26.2 or newer
 - Docker CLI
 - rsync
-- Root privileges for backup and restore commands
+- Sufficient privileges to manage the configured Docker containers and to `chown` files to the configured `user`/`group`
 
 ## Installation
 
@@ -38,7 +68,7 @@ Build the binary:
 make build
 ```
 
-Install it to `/usr/sbin/dackup`:
+Install it to `/usr/local/sbin/dackup`:
 
 ```bash
 make install
@@ -82,6 +112,18 @@ Update an existing container interactively:
 dackup config update
 ```
 
+Remove an existing container interactively:
+
+```bash
+dackup config remove
+```
+
+List configured containers:
+
+```bash
+dackup config list
+```
+
 Use a custom containers configuration file:
 
 ```bash
@@ -102,8 +144,8 @@ Example configuration:
 {
   "user": "appuser",
   "group": "appgroup",
-  "backup_src_dir": "/opt/apps_docker",
-  "backup_dst_dir": "/backups/in",
+  "data_dir": "/opt/apps_docker",
+  "staging_dir": "/backups/in",
   "containers": [
     {
       "container": "paperless",
@@ -141,8 +183,9 @@ Example configuration:
 | --- | --- |
 | `user` | Owner user applied to backed up or restored files. |
 | `group` | Owner group applied to backed up or restored files. |
-| `backup_src_dir` | Source root used by `backup`; restore uses this as its default destination root. |
-| `backup_dst_dir` | Destination root used by `backup`; restore uses this as its default source root. |
+| `data_dir` | Live application data root. Source for `backup`; default destination root for `restore`. |
+| `staging_dir` | Staging root used for the rsync transfer. Destination for `backup`; default source root for `restore`. |
+| `backend_dir` | Optional durable storage root for the configured backup backend (e.g. Borg repositories). Unused by the default no-op backend. |
 | `config_file` | Optional path to another config file containing `containers`. |
 | `containers` | List of configured Docker containers. |
 | `container` | Docker container name. |
@@ -161,25 +204,25 @@ Default backup paths:
 Back up all configured containers:
 
 ```bash
-sudo dackup backup
+dackup backup
 ```
 
 Back up one container:
 
 ```bash
-sudo dackup backup paperless
+dackup backup paperless
 ```
 
 Back up multiple containers:
 
 ```bash
-sudo dackup backup paperless adguard
+dackup backup paperless adguard
 ```
 
 Use custom paths:
 
 ```bash
-sudo dackup backup \
+dackup backup \
   --src-dir /opt/apps_docker \
   --dst-dir /backups/in \
   --log-file /var/log/docker-backup.log
@@ -188,7 +231,7 @@ sudo dackup backup \
 Use a custom config file:
 
 ```bash
-sudo dackup backup --config-file /path/to/config.json
+dackup backup --config-file /path/to/config.json
 ```
 
 ## Restore
@@ -202,25 +245,25 @@ Default restore paths:
 Restore all configured containers:
 
 ```bash
-sudo dackup restore
+dackup restore
 ```
 
 Restore one container:
 
 ```bash
-sudo dackup restore paperless
+dackup restore paperless
 ```
 
 Restore multiple containers:
 
 ```bash
-sudo dackup restore paperless adguard
+dackup restore paperless adguard
 ```
 
 Use custom paths:
 
 ```bash
-sudo dackup restore \
+dackup restore \
   --src-dir /backups/in \
   --dst-dir /opt/apps_docker \
   --log-file /var/log/docker-restore.log
@@ -229,7 +272,7 @@ sudo dackup restore \
 Use a custom config file:
 
 ```bash
-sudo dackup restore --config-file /path/to/config.json
+dackup restore --config-file /path/to/config.json
 ```
 
 ## Global flags
@@ -309,9 +352,22 @@ Build locally:
 go build -o build/dackup .
 ```
 
+`test/secret.key` and `test/config.*.json` are fixtures for the Kopia and Restic storage integration tests (local MinIO/Azurite/etc. emulators only, no real credentials) — it is not a template for the real `~/.config/dackup/secret.key`, and should never be copied into an actual deployment.
+
 ## Safety notes
 
-- Run backup and restore with `sudo`.
+- Run backup and restore as a user with permission to manage the configured Docker containers and to `chown` files to the configured `user`/`group` — often root, but no longer enforced by dackup itself.
 - Make sure Docker container names match the names in your configuration.
 - Use `--dry-run` before running a backup or restore for the first time.
 - Restore uses `rsync -a --delete`, so destination files not present in the backup source can be removed.
+
+# TODO
+Here is a list of todo things that should be implemented :
+- [ ] Use backend for backup usage:
+  - [ ] rclone
+  - [x] Borg
+  - [x] Kopia
+  - [x] restic
+  - [ ] ... ?
+- [ ] Add podman integration, not only docker
+- [ ] More ... ?

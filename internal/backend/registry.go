@@ -1,0 +1,16 @@
+package backend
+
+import (
+	"dackup/internal/backend/borg"
+	"dackup/internal/backend/kopia"
+	"dackup/internal/backend/restic"
+)
+
+// AvailableBackends lists the names of concrete backends that can be
+// selected via the "dackup backend" command, in addition to the implicit
+// default (empty Backend field -> default.Backend). Adding a backend means
+// registering its name here plus adding one case each to ParseSettings and
+// Factory.GetBackend.
+func AvailableBackends() []string {
+	return []string{borg.Name, kopia.Name, restic.Name}
+}

@@ -1,0 +1,48 @@
+{
+  "user": "appuser",
+  "group": "appgroup",
+  "data_dir": "./test/volumes",
+  "staging_dir": "./test/test_backups/in",
+  "backend_dir": "./test/test_backups/repo-restic",
+  "backend": "restic",
+  "backend_settings": {
+    "global_repo_name": "global",
+    "encrypted_password": "v1:77XYnrW7klBrebW6TUDMIwisatBeEAZ2MyvRqIrKnBEn3zWOeMOKVJJu8Jj02o8e/S/HKsWGmg==",
+    "storage_type": "s3",
+    "s3": {
+      "endpoint": "localhost:9000",
+      "bucket": "dackup-test",
+      "disable_tls": true,
+      "access_key_id": "minioadmin",
+      "encrypted_secret_access_key": "v1:jO6E2G3lILH3t0XN3d5Fd8kO7IS2vNuezhteQ+7ehqI69sbPMsQ="
+    }
+  },
+  "containers": [
+    {
+      "container": "test",
+      "to_stop": true,
+      "paths": [
+        "/data/test",
+        "/config/test"
+      ],
+      "contains": [
+        "test_db",
+        "test_broker"
+      ]
+    },
+    {
+      "container": "test_db",
+      "to_stop": true,
+      "paths": [
+        "/data/test_db"
+      ]
+    },
+    {
+      "container": "test_broker",
+      "to_stop": true,
+      "paths": [
+        "/data/test_broker"
+      ]
+    }
+  ]
+}
