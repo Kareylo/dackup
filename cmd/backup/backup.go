@@ -190,13 +190,21 @@ func runBackupWithService(
 		return err
 	}
 
+	var backendErr error
 	if groupedBackend, ok := backupBackend.(backend.GroupedBackend); ok {
 		groups := shared.BackendGroupsFromContainerGroups(shared.ContainerGroups(configs))
 		if err := groupedBackend.BackupGroups(backupDstDir, groups); err != nil {
-			return err
+			service.logger.Log("ERROR", fmt.Sprintf("Backend %q backup failed: %v", backupBackend.Name(), err))
+			backendErr = err
 		}
 	} else if err := backupBackend.Backup(backupDstDir); err != nil {
-		return err
+		service.logger.Log("ERROR", fmt.Sprintf("Backend %q backup failed: %v", backupBackend.Name(), err))
+		backendErr = err
+	}
+
+	if backendErr != nil {
+		service.logger.Log("WARN", "Backup command finished with errors")
+		return backendErr
 	}
 
 	service.logger.Log("INFO", "Backup command finished successfully")
@@ -206,7 +214,7 @@ func runBackupWithService(
 // resolveBackend constructs the configured Backend (or the default no-op backend if
 // config.Backend is unset) via internal/backend.Factory, using the same
 // dependencies commandService already builds for TransferService.
-func resolveBackend(service commandService, config shared.DackupConfig) (backend.Backend, error) {
+var resolveBackend = func(service commandService, config shared.DackupConfig) (backend.Backend, error) {
 	factory := backend.Factory{
 		Runner:     service.runner,
 		Logger:     service.logger,
