@@ -153,13 +153,16 @@ func runRestoreWithService(
 		return err
 	}
 
+	var backendErr error
 	if groupedBackend, ok := restoreBackend.(backend.GroupedBackend); ok {
 		groups := shared.BackendGroupsFromContainerGroups(shared.ContainerGroups(configs))
 		if err := groupedBackend.RestoreGroups(restoreSrcDir, groups); err != nil {
-			return err
+			service.logger.Log("ERROR", fmt.Sprintf("Backend %q restore failed: %v", restoreBackend.Name(), err))
+			backendErr = err
 		}
 	} else if err := restoreBackend.Restore(restoreSrcDir); err != nil {
-		return err
+		service.logger.Log("ERROR", fmt.Sprintf("Backend %q restore failed: %v", restoreBackend.Name(), err))
+		backendErr = err
 	}
 
 	containersToStop := restoreContainersToStopFromConfig(configs)
@@ -193,6 +196,11 @@ func runRestoreWithService(
 		return err
 	}
 
+	if backendErr != nil {
+		service.logger.Log("WARN", "Restore command finished with errors")
+		return backendErr
+	}
+
 	service.logger.Log("INFO", "Restore command finished successfully")
 	return nil
 }
@@ -200,7 +208,7 @@ func runRestoreWithService(
 // resolveBackend constructs the configured Backend (or the default no-op backend if
 // config.Backend is unset) via internal/backend.Factory, using the same
 // dependencies commandService already builds for TransferService.
-func resolveBackend(service commandService, config shared.DackupConfig) (backend.Backend, error) {
+var resolveBackend = func(service commandService, config shared.DackupConfig) (backend.Backend, error) {
 	factory := backend.Factory{
 		Runner:     service.runner,
 		Logger:     service.logger,

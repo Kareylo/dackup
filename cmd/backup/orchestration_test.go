@@ -16,12 +16,14 @@ import (
 // without needing a real borg/kopia config.
 type fakeBinaryBackend struct {
 	binaryName string
+	backupErr  error
+	restoreErr error
 }
 
-func (fakeBinaryBackend) Name() string                    { return "fake" }
-func (fakeBinaryBackend) Backup(stagingDir string) error  { return nil }
-func (fakeBinaryBackend) Restore(stagingDir string) error { return nil }
-func (fb fakeBinaryBackend) BinaryName() string           { return fb.binaryName }
+func (fakeBinaryBackend) Name() string                       { return "fake" }
+func (fb fakeBinaryBackend) Backup(stagingDir string) error  { return fb.backupErr }
+func (fb fakeBinaryBackend) Restore(stagingDir string) error { return fb.restoreErr }
+func (fb fakeBinaryBackend) BinaryName() string              { return fb.binaryName }
 
 type fakeOrchestrationLogger struct {
 	lines []string
@@ -157,6 +159,17 @@ func withBackupDirs(t *testing.T, srcDir string, dstDir string) {
 	t.Cleanup(func() {
 		backupSrcDir = originalSrcDir
 		backupDstDir = originalDstDir
+	})
+}
+
+func withResolveBackend(t *testing.T, fn func(commandService, shared.DackupConfig) (backend.Backend, error)) {
+	t.Helper()
+
+	original := resolveBackend
+	resolveBackend = fn
+
+	t.Cleanup(func() {
+		resolveBackend = original
 	})
 }
 
@@ -317,6 +330,65 @@ func TestRunBackupWithService_StopFailureAbortsAndRestartsAlreadyStoppedContaine
 
 	if !reflect.DeepEqual(fixture.runner.started, []string{"a"}) {
 		t.Fatalf("expected already-stopped container a to be restarted despite the abort, got %#v", fixture.runner.started)
+	}
+}
+
+func TestRunBackupWithService_BackendBackupFailureLogsAndContinues(t *testing.T) {
+	fixture := newTestOrchestrationFixture(t, map[string]bool{"a": true}, nil)
+	withBackupDirs(t, fixture.srcDir, fixture.dstDir)
+	withResolveBackend(t, func(commandService, shared.DackupConfig) (backend.Backend, error) {
+		return fakeBinaryBackend{backupErr: fmt.Errorf("remote storage unreachable")}, nil
+	})
+
+	if err := os.MkdirAll(filepath.Join(fixture.srcDir, "data"), 0o755); err != nil {
+		t.Fatalf("failed to create configured path: %v", err)
+	}
+
+	effectiveConfigPath := filepath.Join(fixture.dstDir, "config.json")
+	touchFile(t, effectiveConfigPath)
+
+	config := shared.DackupConfig{
+		User:  "backupuser",
+		Group: "backupgroup",
+		Containers: []shared.ContainerConfig{
+			{Container: "a", ToStop: true, Paths: []string{"data"}},
+		},
+	}
+
+	err := runBackupWithService(fixture.service, config, effectiveConfigPath, nil)
+	if err == nil {
+		t.Fatal("expected an error when the backend backup fails")
+	}
+
+	if !strings.Contains(err.Error(), "remote storage unreachable") {
+		t.Fatalf("expected error to mention the backend failure, got %q", err.Error())
+	}
+
+	if !reflect.DeepEqual(fixture.runner.stopped, []string{"a"}) {
+		t.Fatalf("expected container a to still be stopped, got %#v", fixture.runner.stopped)
+	}
+
+	if !reflect.DeepEqual(fixture.runner.started, []string{"a"}) {
+		t.Fatalf("expected container a to still be restarted despite the backend failure, got %#v", fixture.runner.started)
+	}
+
+	if !fixture.runner.ranRsync {
+		t.Fatal("expected rsync to still have been invoked")
+	}
+
+	if !fixture.runner.ranChown {
+		t.Fatal("expected chown to still have been invoked")
+	}
+
+	foundErrorLine := false
+	for _, line := range fixture.logger.lines {
+		if strings.HasPrefix(line, "[ERROR]") && strings.Contains(line, "remote storage unreachable") {
+			foundErrorLine = true
+			break
+		}
+	}
+	if !foundErrorLine {
+		t.Fatalf("expected an [ERROR] log line mentioning the backend failure, got %#v", fixture.logger.lines)
 	}
 }
 
