@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/term"
 )
@@ -217,6 +218,58 @@ func (service PromptService) selectInteractive(label string, options []string, c
 			return checked, nil
 		case "interrupt":
 			return nil, ErrPromptInterrupted
+		}
+	}
+}
+
+// Secret prompts for label like String, but with a Terminal it reads the
+// answer in raw mode so the typed characters are never echoed. It reads
+// from the same Reader the other prompts use (rather than straight from
+// the terminal's file descriptor), so no buffered input is skipped.
+// Backspace removes the last character, Ctrl-C returns
+// ErrPromptInterrupted, and escape sequences such as arrow keys are
+// ignored.
+func (service PromptService) Secret(label string) (string, error) {
+	if service.Terminal == nil {
+		return service.String(label)
+	}
+
+	fmt.Printf("%s: ", label)
+
+	restore, err := service.Terminal.MakeRaw()
+	if err != nil {
+		return "", err
+	}
+	defer restore()
+
+	var value []byte
+
+	for {
+		key, err := service.Reader.ReadByte()
+		if err != nil {
+			return "", err
+		}
+
+		switch key {
+		case '\r', '\n':
+			fmt.Print("\r\n")
+			return strings.TrimSpace(string(value)), nil
+		case 0x03:
+			fmt.Print("\r\n")
+			return "", ErrPromptInterrupted
+		case 0x7f, 0x08:
+			if len(value) > 0 {
+				_, size := utf8.DecodeLastRune(value)
+				value = value[:len(value)-size]
+			}
+		case 0x1b:
+			for range 2 {
+				if _, err := service.Reader.ReadByte(); err != nil {
+					return "", err
+				}
+			}
+		default:
+			value = append(value, key)
 		}
 	}
 }
