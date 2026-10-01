@@ -12,7 +12,8 @@
     "webdav": {
       "url": "http://localhost:8080",
       "username": "dackup",
-      "encrypted_password": "v1:ZV2Eth647mhRP02nE/UNUSd9CVOEAMC4WR9Tp+dIdrUVLYjPm+M="
+      "encrypted_password": "v1:ZV2Eth647mhRP02nE/UNUSd9CVOEAMC4WR9Tp+dIdrUVLYjPm+M=",
+      "allow_insecure_http": true
     }
   },
   "containers": [

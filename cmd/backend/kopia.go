@@ -533,5 +533,15 @@ func (service commandService) promptKopiaWebDAVSettings(current *webdav.Storage)
 		config.EncryptedPassword = encryptedPassword
 	}
 
+	if config.SendsCredentialsInCleartext() {
+		allowInsecureHTTP, err := service.prompt.Bool("The WebDAV URL is not https://, so the password would be sent in cleartext. Allow it anyway?", config.AllowInsecureHTTP)
+		if err != nil {
+			return webdav.Storage{}, err
+		}
+		config.AllowInsecureHTTP = allowInsecureHTTP
+	} else {
+		config.AllowInsecureHTTP = false
+	}
+
 	return config, nil
 }

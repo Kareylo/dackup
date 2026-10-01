@@ -8,11 +8,19 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // Name is the identifier written to kopia.Config.StorageType (and kopia's
 // own "repository create/connect webdav" subcommand).
 const Name = "webdav"
+
+// mkcolTimeout bounds EnsureCollection's MKCOL request, so an unresponsive
+// server fails the backup instead of hanging it indefinitely.
+const mkcolTimeout = 30 * time.Second
+
+// mkcolClient is used instead of http.DefaultClient, which has no timeout.
+var mkcolClient = &http.Client{Timeout: mkcolTimeout}
 
 // Storage configures a WebDAV server as repository storage.
 type Storage struct {
@@ -28,6 +36,11 @@ type Storage struct {
 
 	// EncryptedPassword is ciphertext produced by a shared.SecretStore.
 	EncryptedPassword string `json:"encrypted_password,omitempty"`
+
+	// AllowInsecureHTTP opts in to sending Username/EncryptedPassword over
+	// a non-https URL, where Basic auth travels in cleartext. Validate
+	// rejects that combination unless this is set.
+	AllowInsecureHTTP bool `json:"allow_insecure_http,omitempty"`
 }
 
 // Validate reports whether the WebDAV settings are well-formed.
@@ -43,7 +56,20 @@ func (s Storage) Validate() error {
 		return fmt.Errorf("kopia webdav storage requires username and encrypted_password to be set together")
 	}
 
+	if s.SendsCredentialsInCleartext() && !s.AllowInsecureHTTP {
+		return fmt.Errorf("kopia webdav storage would send credentials in cleartext over %q; use https:// or set allow_insecure_http", s.URL)
+	}
+
 	return nil
+}
+
+// SendsCredentialsInCleartext reports whether a username is configured for
+// a URL that isn't https://, i.e. Basic auth would go out unencrypted.
+func (s Storage) SendsCredentialsInCleartext() bool {
+	if strings.TrimSpace(s.Username) == "" {
+		return false
+	}
+	return !strings.HasPrefix(strings.ToLower(strings.TrimSpace(s.URL)), "https://")
 }
 
 // BuildInvocation implements storage.Provider.
@@ -95,7 +121,7 @@ func (s Storage) EnsureCollection(repoName string, secrets shared.SecretStore) e
 		req.SetBasicAuth(s.Username, password)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := mkcolClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to create WebDAV collection %s: %w", url, err)
 	}
