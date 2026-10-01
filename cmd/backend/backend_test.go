@@ -869,6 +869,51 @@ func TestPromptKopiaWebDAVSettings_GathersCredentialsWhenUsernameGiven(t *testin
 	}
 }
 
+func TestPromptKopiaWebDAVSettings_PlainHTTPWithCredentialsAsksForOptIn(t *testing.T) {
+	// url, username, password, allow insecure http -> y
+	service := newTestServiceWithSecretKey(t, "http://webdav.example.com\ndackup\nhunter2\ny\n")
+
+	got, err := service.promptKopiaWebDAVSettings(nil)
+	if err != nil {
+		t.Fatalf("promptKopiaWebDAVSettings returned error: %v", err)
+	}
+
+	if !got.AllowInsecureHTTP {
+		t.Fatalf("expected allow_insecure_http to be set after opting in, got %#v", got)
+	}
+}
+
+func TestPromptKopiaWebDAVSettings_PlainHTTPWithCredentialsDefaultsToNoOptIn(t *testing.T) {
+	// url, username, password, allow insecure http -> (default: no)
+	service := newTestServiceWithSecretKey(t, "http://webdav.example.com\ndackup\nhunter2\n\n")
+
+	got, err := service.promptKopiaWebDAVSettings(nil)
+	if err != nil {
+		t.Fatalf("promptKopiaWebDAVSettings returned error: %v", err)
+	}
+
+	if got.AllowInsecureHTTP {
+		t.Fatalf("expected allow_insecure_http to stay false by default, got %#v", got)
+	}
+	if err := got.Validate(); err == nil {
+		t.Fatal("expected the resulting settings to fail validation without the opt-in")
+	}
+}
+
+func TestPromptKopiaWebDAVSettings_HTTPSClearsInsecureOptIn(t *testing.T) {
+	service := newTestServiceWithSecretKey(t, "https://webdav.example.com\ndackup\nhunter2\n")
+
+	current := &webdav.Storage{URL: "http://webdav.example.com", AllowInsecureHTTP: true}
+	got, err := service.promptKopiaWebDAVSettings(current)
+	if err != nil {
+		t.Fatalf("promptKopiaWebDAVSettings returned error: %v", err)
+	}
+
+	if got.AllowInsecureHTTP {
+		t.Fatalf("expected allow_insecure_http to be cleared for an https URL, got %#v", got)
+	}
+}
+
 func TestPromptKopiaSettings_SelectsRcloneStorageAndGathersItsSettings(t *testing.T) {
 	// bin -> (empty), global_repo_name -> (default), storage_type ->
 	// rclone, remote_name, remote_path -> (empty), rclone_exe_path ->

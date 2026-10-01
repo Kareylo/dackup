@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeSecretStore struct{}
@@ -157,5 +158,73 @@ func TestStorage_EnsureCollectionReturnsErrorOnFailure(t *testing.T) {
 
 	if err := s.EnsureCollection("myrepo", fakeSecretStore{}); err == nil {
 		t.Fatal("expected error for a non-2xx, non-405 status")
+	}
+}
+
+func TestStorage_ValidateRejectsCredentialsOverPlainHTTP(t *testing.T) {
+	cleartext := Storage{URL: "http://webdav.example.com", Username: "u", EncryptedPassword: "enc:pw"}
+	if err := cleartext.Validate(); err == nil {
+		t.Fatal("expected error for credentials over a plain http:// URL")
+	}
+
+	optedIn := Storage{URL: "http://webdav.example.com", Username: "u", EncryptedPassword: "enc:pw", AllowInsecureHTTP: true}
+	if err := optedIn.Validate(); err != nil {
+		t.Fatalf("expected no error when allow_insecure_http is set, got %v", err)
+	}
+
+	unauthenticated := Storage{URL: "http://webdav.example.com"}
+	if err := unauthenticated.Validate(); err != nil {
+		t.Fatalf("expected no error for an unauthenticated plain http:// server, got %v", err)
+	}
+
+	upperCaseScheme := Storage{URL: "HTTPS://webdav.example.com", Username: "u", EncryptedPassword: "enc:pw"}
+	if err := upperCaseScheme.Validate(); err != nil {
+		t.Fatalf("expected an upper-case https scheme to count as https, got %v", err)
+	}
+}
+
+func TestStorage_SendsCredentialsInCleartext(t *testing.T) {
+	cases := []struct {
+		storage Storage
+		want    bool
+	}{
+		{Storage{URL: "http://webdav.example.com", Username: "u"}, true},
+		{Storage{URL: "https://webdav.example.com", Username: "u"}, false},
+		{Storage{URL: "http://webdav.example.com"}, false},
+		{Storage{URL: "webdav.example.com", Username: "u"}, true},
+	}
+
+	for _, tc := range cases {
+		if got := tc.storage.SendsCredentialsInCleartext(); got != tc.want {
+			t.Fatalf("SendsCredentialsInCleartext(%#v) = %v, want %v", tc.storage, got, tc.want)
+		}
+	}
+}
+
+func TestMKCOLClient_HasTimeout(t *testing.T) {
+	if mkcolClient.Timeout != mkcolTimeout || mkcolTimeout <= 0 {
+		t.Fatalf("expected mkcolClient to use a positive mkcolTimeout, got client timeout %v (mkcolTimeout %v)", mkcolClient.Timeout, mkcolTimeout)
+	}
+}
+
+func TestStorage_EnsureCollectionTimesOutOnUnresponsiveServer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	originalClient := mkcolClient
+	mkcolClient = &http.Client{Timeout: 100 * time.Millisecond}
+	defer func() { mkcolClient = originalClient }()
+
+	s := Storage{URL: server.URL}
+
+	start := time.Now()
+	err := s.EnsureCollection("myrepo", fakeSecretStore{})
+	if err == nil {
+		t.Fatal("expected error from an unresponsive server")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("expected EnsureCollection to give up after the client timeout, took %v", elapsed)
 	}
 }
