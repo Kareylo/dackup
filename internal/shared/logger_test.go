@@ -54,3 +54,56 @@ func TestFileLogger_Log_WriteFailureDoesNotPanic(t *testing.T) {
 
 	logger.Log("ERROR", "should not panic when the log file can't be written to")
 }
+
+func TestFileLogger_Log_CreatesLogFileReadableByOwnerOnly(t *testing.T) {
+	logFile := filepath.Join(t.TempDir(), "dackup.log")
+	logger := FileLogger{LogFile: logFile}
+
+	logger.Log("INFO", "backup started")
+
+	assertFileMode(t, logFile, 0o600)
+}
+
+func assertFileMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("failed to stat %s: %v", path, err)
+	}
+
+	if got := info.Mode().Perm(); got != want {
+		t.Fatalf("expected %s to have mode %#o, got %#o", path, want, got)
+	}
+}
+
+func writeWorldReadableLogFile(t *testing.T) string {
+	t.Helper()
+
+	logFile := filepath.Join(t.TempDir(), "existing.log")
+	if err := os.WriteFile(logFile, []byte("old line\n"), 0o644); err != nil {
+		t.Fatalf("failed to create existing log file: %v", err)
+	}
+	if err := os.Chmod(logFile, 0o644); err != nil {
+		t.Fatalf("failed to chmod existing log file: %v", err)
+	}
+
+	return logFile
+}
+
+func TestFileLogger_Log_TightensExistingWorldReadableLogFile(t *testing.T) {
+	logFile := writeWorldReadableLogFile(t)
+	logger := FileLogger{LogFile: logFile}
+
+	logger.Log("INFO", "backup started")
+
+	assertFileMode(t, logFile, 0o600)
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("failed to read log file: %v", err)
+	}
+	if !strings.HasPrefix(string(data), "old line\n") {
+		t.Fatalf("expected existing content to be kept, got %q", string(data))
+	}
+}

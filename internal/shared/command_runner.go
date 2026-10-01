@@ -107,7 +107,7 @@ func (runner LoggedCommandRunner) Run(name string, args ...string) error {
 		fs = OSFileSystem{}
 	}
 
-	logFile, err := fs.OpenFile(runner.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	logFile, err := openLogFile(fs, runner.LogFile)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
@@ -148,7 +148,7 @@ func (runner LoggedCommandRunner) RunInDirWithEnv(dir string, env []string, name
 		fs = OSFileSystem{}
 	}
 
-	logFile, err := fs.OpenFile(runner.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	logFile, err := openLogFile(fs, runner.LogFile)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
