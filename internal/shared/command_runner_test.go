@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -256,5 +257,104 @@ func TestLoggedCommandRunner_OutputWithEnvErrorsWhenWrappedRunnerLacksSupport(t 
 
 	if _, err := runner.OutputWithEnv(nil, "echo", "hi"); err == nil {
 		t.Fatal("expected an error when the wrapped runner does not implement EnvCommandRunner")
+	}
+}
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+
+	original := os.Stdout
+	os.Stdout = writer
+	defer func() { os.Stdout = original }()
+
+	fn()
+
+	writer.Close()
+	output, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("failed to read captured stdout: %v", err)
+	}
+
+	return string(output)
+}
+
+func TestRedactArgs(t *testing.T) {
+	testCases := []struct {
+		arg  string
+		want string
+	}{
+		{"--sftp-password=hunter2", "--sftp-password=***"},
+		{"--webdav-password=hunter2", "--webdav-password=***"},
+		{"--storage-key=abc", "--storage-key=***"},
+		{"--key=abc", "--key=***"},
+		{"--client-secret=abc", "--client-secret=***"},
+		{"--sas-token=abc", "--sas-token=***"},
+		{"--keyfile=/home/dackup/.ssh/id_ed25519", "--keyfile=/home/dackup/.ssh/id_ed25519"},
+		{"--known-hosts=/home/dackup/.ssh/known_hosts", "--known-hosts=/home/dackup/.ssh/known_hosts"},
+		{"--bucket=my-bucket", "--bucket=my-bucket"},
+		{"--sftp-password", "--sftp-password"},
+		{"repository", "repository"},
+	}
+
+	for _, testCase := range testCases {
+		got := redactArgs([]string{testCase.arg})
+		if len(got) != 1 || got[0] != testCase.want {
+			t.Errorf("redactArgs(%q) = %v, want [%q]", testCase.arg, got, testCase.want)
+		}
+	}
+}
+
+func TestRedactArgs_DoesNotModifyInput(t *testing.T) {
+	args := []string{"--storage-key=abc"}
+
+	redactArgs(args)
+
+	if args[0] != "--storage-key=abc" {
+		t.Fatalf("expected input slice to be left unchanged, got %v", args)
+	}
+}
+
+func TestLoggedCommandRunner_Run_VerboseRedactsSecretFlags(t *testing.T) {
+	runner := LoggedCommandRunner{
+		LogFile: filepath.Join(t.TempDir(), "run.log"),
+		Options: &Options{Verbose: true},
+	}
+
+	output := captureStdout(t, func() {
+		if err := runner.Run("sh", "-c", "true", "--storage-key=supersecret"); err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	})
+
+	if strings.Contains(output, "supersecret") {
+		t.Fatalf("expected secret to be redacted from verbose output, got %q", output)
+	}
+	if !strings.Contains(output, "--storage-key=***") {
+		t.Fatalf("expected redacted flag in verbose output, got %q", output)
+	}
+}
+
+func TestLoggedCommandRunner_RunInDirWithEnv_VerboseRedactsSecretFlags(t *testing.T) {
+	runner := LoggedCommandRunner{
+		LogFile: filepath.Join(t.TempDir(), "run.log"),
+		Options: &Options{Verbose: true},
+	}
+
+	output := captureStdout(t, func() {
+		if err := runner.RunInDirWithEnv("", nil, "sh", "-c", "true", "--sftp-password=supersecret"); err != nil {
+			t.Fatalf("RunInDirWithEnv returned error: %v", err)
+		}
+	})
+
+	if strings.Contains(output, "supersecret") {
+		t.Fatalf("expected secret to be redacted from verbose output, got %q", output)
+	}
+	if !strings.Contains(output, "--sftp-password=***") {
+		t.Fatalf("expected redacted flag in verbose output, got %q", output)
 	}
 }

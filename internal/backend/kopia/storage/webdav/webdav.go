@@ -50,15 +50,20 @@ func (s Storage) Validate() error {
 func (s Storage) BuildInvocation(repoName string, secrets shared.SecretStore) (storage.Invocation, error) {
 	args := []string{"--url=" + urlJoin(s.URL, repoName)}
 
+	var env []string
 	if s.Username != "" {
 		password, err := secrets.Decrypt(s.EncryptedPassword)
 		if err != nil {
 			return storage.Invocation{}, fmt.Errorf("failed to decrypt kopia webdav password: %w", err)
 		}
-		args = append(args, "--webdav-username="+s.Username, "--webdav-password="+password)
+		// The password goes through kopia's KOPIA_WEBDAV_PASSWORD env var
+		// rather than --webdav-password, so it never appears in the
+		// process list.
+		args = append(args, "--webdav-username="+s.Username)
+		env = []string{"KOPIA_WEBDAV_PASSWORD=" + password}
 	}
 
-	return storage.Invocation{Kind: Name, Args: args}, nil
+	return storage.Invocation{Kind: Name, Args: args, Env: env}, nil
 }
 
 // EnsureCollection creates repoName's WebDAV collection (directory) via

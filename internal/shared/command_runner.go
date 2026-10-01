@@ -4,8 +4,27 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 )
+
+// secretFlagPattern matches a "--name=value" flag whose hyphen-separated
+// name contains a password/key/secret/token word (e.g. --sftp-password,
+// --storage-key, --key), but not one where it's only a substring of a
+// longer word (e.g. --keyfile).
+var secretFlagPattern = regexp.MustCompile(`^(--(?:[a-z0-9]+-)*(?:password|key|secret|token)(?:-[a-z0-9]+)*=).+$`)
+
+// redactArgs returns a copy of args with every secret-looking flag's value
+// replaced by "***", for echoing a command line without leaking
+// credentials. args itself is left unchanged.
+func redactArgs(args []string) []string {
+	redacted := make([]string, len(args))
+	for i, arg := range args {
+		redacted[i] = secretFlagPattern.ReplaceAllString(arg, "${1}***")
+	}
+
+	return redacted
+}
 
 // CommandRunner abstracts running an external command, so callers are
 // testable without invoking a real subprocess.
@@ -95,7 +114,7 @@ func (runner LoggedCommandRunner) Run(name string, args ...string) error {
 	defer logFile.Close()
 
 	if runner.Options != nil && runner.Options.Verbose {
-		fmt.Printf("Running: %s %s\n", name, strings.Join(args, " "))
+		fmt.Printf("Running: %s %s\n", name, strings.Join(redactArgs(args), " "))
 	}
 
 	cmd := exec.Command(name, args...)
@@ -136,7 +155,7 @@ func (runner LoggedCommandRunner) RunInDirWithEnv(dir string, env []string, name
 	defer logFile.Close()
 
 	if runner.Options != nil && runner.Options.Verbose {
-		fmt.Printf("Running: %s %s\n", name, strings.Join(args, " "))
+		fmt.Printf("Running: %s %s\n", name, strings.Join(redactArgs(args), " "))
 	}
 
 	cmd := exec.Command(name, args...)
