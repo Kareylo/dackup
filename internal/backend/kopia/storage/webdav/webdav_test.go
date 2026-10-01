@@ -34,6 +34,16 @@ func equalArgs(got []string, want []string) bool {
 	return true
 }
 
+func assertSecretNotInArgs(t *testing.T, args []string, secret string) {
+	t.Helper()
+
+	for _, arg := range args {
+		if strings.Contains(arg, secret) {
+			t.Fatalf("expected secret %q to stay out of argv, found it in %q", secret, arg)
+		}
+	}
+}
+
 func TestStorage_ValidateRequiresURLAndPairedAuth(t *testing.T) {
 	if err := (Storage{}).Validate(); err == nil {
 		t.Fatal("expected error for empty Storage")
@@ -82,10 +92,17 @@ func TestStorage_BuildInvocationWithAuth(t *testing.T) {
 		t.Fatalf("BuildInvocation returned error: %v", err)
 	}
 
-	wantArgs := []string{"--url=https://webdav.example.com/backups/myrepo", "--webdav-username=dackup", "--webdav-password=hunter2"}
+	wantArgs := []string{"--url=https://webdav.example.com/backups/myrepo", "--webdav-username=dackup"}
 	if !equalArgs(invocation.Args, wantArgs) {
 		t.Fatalf("expected args %v, got %v", wantArgs, invocation.Args)
 	}
+
+	wantEnv := []string{"KOPIA_WEBDAV_PASSWORD=hunter2"}
+	if !equalArgs(invocation.Env, wantEnv) {
+		t.Fatalf("expected env %v, got %v", wantEnv, invocation.Env)
+	}
+
+	assertSecretNotInArgs(t, invocation.Args, "hunter2")
 }
 
 func TestStorage_EnsureCollectionSendsMKCOLWithAuth(t *testing.T) {

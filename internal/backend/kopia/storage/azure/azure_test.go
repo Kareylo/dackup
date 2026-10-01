@@ -32,6 +32,16 @@ func equalArgs(got []string, want []string) bool {
 	return true
 }
 
+func assertSecretNotInArgs(t *testing.T, args []string, secret string) {
+	t.Helper()
+
+	for _, arg := range args {
+		if strings.Contains(arg, secret) {
+			t.Fatalf("expected secret %q to stay out of argv, found it in %q", secret, arg)
+		}
+	}
+}
+
 func TestStorage_ValidateRequiresFields(t *testing.T) {
 	if err := (Storage{}).Validate(); err == nil {
 		t.Fatal("expected error for empty Storage")
@@ -55,10 +65,17 @@ func TestStorage_BuildInvocation(t *testing.T) {
 		t.Fatalf("BuildInvocation returned error: %v", err)
 	}
 
-	wantArgs := []string{"--container=my-container", "--storage-account=myaccount", "--storage-key=storagekey", "--prefix=myrepo/"}
+	wantArgs := []string{"--container=my-container", "--storage-account=myaccount", "--prefix=myrepo/"}
 	if !equalArgs(invocation.Args, wantArgs) {
 		t.Fatalf("expected args %v, got %v", wantArgs, invocation.Args)
 	}
+
+	wantEnv := []string{"AZURE_STORAGE_KEY=storagekey"}
+	if !equalArgs(invocation.Env, wantEnv) {
+		t.Fatalf("expected env %v, got %v", wantEnv, invocation.Env)
+	}
+
+	assertSecretNotInArgs(t, invocation.Args, "storagekey")
 }
 
 func TestStorage_BuildInvocationWithStorageDomain(t *testing.T) {
@@ -74,8 +91,15 @@ func TestStorage_BuildInvocationWithStorageDomain(t *testing.T) {
 		t.Fatalf("BuildInvocation returned error: %v", err)
 	}
 
-	wantArgs := []string{"--container=my-container", "--storage-account=myaccount", "--storage-key=storagekey", "--prefix=myrepo/", "--storage-domain=localhost:10000"}
+	wantArgs := []string{"--container=my-container", "--storage-account=myaccount", "--prefix=myrepo/", "--storage-domain=localhost:10000"}
 	if !equalArgs(invocation.Args, wantArgs) {
 		t.Fatalf("expected args %v, got %v", wantArgs, invocation.Args)
 	}
+
+	wantEnv := []string{"AZURE_STORAGE_KEY=storagekey"}
+	if !equalArgs(invocation.Env, wantEnv) {
+		t.Fatalf("expected env %v, got %v", wantEnv, invocation.Env)
+	}
+
+	assertSecretNotInArgs(t, invocation.Args, "storagekey")
 }

@@ -284,6 +284,12 @@ func splitEndpointScheme(endpoint string) (string, *bool) {
 	}
 }
 
+// kopiaSFTPPasswordWarning is printed when kopia sftp password auth is
+// chosen: kopia only accepts that password as --sftp-password (no env var,
+// and it disables kingpin's @file argument expansion), so it's visible in
+// the process list while kopia runs.
+const kopiaSFTPPasswordWarning = "WARNING: kopia only accepts the SFTP password on its command line, so any local user can read it (e.g. via ps) while kopia runs. Prefer an SSH key file."
+
 // promptKopiaSFTPSettings gathers sftp.Storage's fields. Auth is
 // mutually exclusive (see sftp.Storage.Validate): a keyfile path is
 // tried first, and only if left empty is a password prompted for.
@@ -334,6 +340,8 @@ func (service commandService) promptKopiaSFTPSettings(current *sftp.Storage) (sf
 	config.KeyfilePath = keyfilePath
 
 	if config.KeyfilePath == "" {
+		fmt.Println(kopiaSFTPPasswordWarning)
+
 		encryptedPassword, err := service.promptEncryptedSecret("SFTP password", config.EncryptedPassword)
 		if err != nil {
 			return sftp.Storage{}, err

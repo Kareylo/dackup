@@ -54,9 +54,10 @@ func (s Storage) BuildInvocation(repoName string, secrets shared.SecretStore) (s
 	args := []string{
 		"--bucket=" + s.Bucket,
 		"--key-id=" + s.KeyID,
-		"--key=" + applicationKey,
 		"--prefix=" + storage.ObjectPrefix(s.Prefix, repoName),
 	}
 
-	return storage.Invocation{Kind: Name, Args: args}, nil
+	// The application key goes through kopia's B2_KEY env var rather than
+	// --key, so it never appears in the process list.
+	return storage.Invocation{Kind: Name, Args: args, Env: []string{"B2_KEY=" + applicationKey}}, nil
 }

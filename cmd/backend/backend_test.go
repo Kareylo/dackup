@@ -13,6 +13,7 @@ import (
 	"dackup/internal/backend/kopia/storage/webdav"
 	"dackup/internal/shared"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1320,5 +1321,63 @@ func TestSelectKopiaCompression_PropagatesReadError(t *testing.T) {
 
 	if _, err := service.selectKopiaCompression(""); err == nil {
 		t.Fatal("expected read error, got nil")
+	}
+}
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+
+	original := os.Stdout
+	os.Stdout = writer
+	defer func() { os.Stdout = original }()
+
+	fn()
+
+	writer.Close()
+	output, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("failed to read captured stdout: %v", err)
+	}
+
+	return string(output)
+}
+
+func TestPromptKopiaSFTPSettings_PasswordAuthWarnsAboutProcessListExposure(t *testing.T) {
+	// host, port -> (default 22), username, path, keyfile_path -> (empty),
+	// password, known_hosts_path -> (empty)
+	service := newTestServiceWithSecretKey(t, "backup.example.com\n\ndackup\n/srv/backups\n\nhunter2\n\n")
+
+	output := captureStdout(t, func() {
+		if _, err := service.promptKopiaSFTPSettings(nil); err != nil {
+			t.Fatalf("promptKopiaSFTPSettings returned error: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, kopiaSFTPPasswordWarning) {
+		t.Fatalf("expected password-auth warning in output, got %q", output)
+	}
+}
+
+func TestPromptKopiaSFTPSettings_KeyfileAuthDoesNotWarn(t *testing.T) {
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	if err := os.WriteFile(keyPath, []byte("fake key"), 0o600); err != nil {
+		t.Fatalf("failed to create fake keyfile: %v", err)
+	}
+
+	service := newTestServiceWithSecretKey(t, "backup.example.com\n\ndackup\n/srv/backups\n"+keyPath+"\n\n")
+
+	output := captureStdout(t, func() {
+		if _, err := service.promptKopiaSFTPSettings(nil); err != nil {
+			t.Fatalf("promptKopiaSFTPSettings returned error: %v", err)
+		}
+	})
+
+	if strings.Contains(output, kopiaSFTPPasswordWarning) {
+		t.Fatalf("expected no password-auth warning with keyfile auth, got %q", output)
 	}
 }

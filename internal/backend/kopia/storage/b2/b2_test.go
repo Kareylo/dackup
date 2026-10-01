@@ -32,6 +32,16 @@ func equalArgs(got []string, want []string) bool {
 	return true
 }
 
+func assertSecretNotInArgs(t *testing.T, args []string, secret string) {
+	t.Helper()
+
+	for _, arg := range args {
+		if strings.Contains(arg, secret) {
+			t.Fatalf("expected secret %q to stay out of argv, found it in %q", secret, arg)
+		}
+	}
+}
+
 func TestStorage_ValidateRequiresFields(t *testing.T) {
 	if err := (Storage{}).Validate(); err == nil {
 		t.Fatal("expected error for empty Storage")
@@ -55,8 +65,15 @@ func TestStorage_BuildInvocation(t *testing.T) {
 		t.Fatalf("BuildInvocation returned error: %v", err)
 	}
 
-	wantArgs := []string{"--bucket=my-bucket", "--key-id=key-id", "--key=appkey", "--prefix=myrepo/"}
+	wantArgs := []string{"--bucket=my-bucket", "--key-id=key-id", "--prefix=myrepo/"}
 	if !equalArgs(invocation.Args, wantArgs) {
 		t.Fatalf("expected args %v, got %v", wantArgs, invocation.Args)
 	}
+
+	wantEnv := []string{"B2_KEY=appkey"}
+	if !equalArgs(invocation.Env, wantEnv) {
+		t.Fatalf("expected env %v, got %v", wantEnv, invocation.Env)
+	}
+
+	assertSecretNotInArgs(t, invocation.Args, "appkey")
 }

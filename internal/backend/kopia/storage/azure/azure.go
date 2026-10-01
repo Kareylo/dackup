@@ -62,7 +62,6 @@ func (s Storage) BuildInvocation(repoName string, secrets shared.SecretStore) (s
 	args := []string{
 		"--container=" + s.Container,
 		"--storage-account=" + s.StorageAccount,
-		"--storage-key=" + storageKey,
 		"--prefix=" + storage.ObjectPrefix(s.Prefix, repoName),
 	}
 
@@ -70,5 +69,7 @@ func (s Storage) BuildInvocation(repoName string, secrets shared.SecretStore) (s
 		args = append(args, "--storage-domain="+s.StorageDomain)
 	}
 
-	return storage.Invocation{Kind: Name, Args: args}, nil
+	// The storage key goes through kopia's AZURE_STORAGE_KEY env var
+	// rather than --storage-key, so it never appears in the process list.
+	return storage.Invocation{Kind: Name, Args: args, Env: []string{"AZURE_STORAGE_KEY=" + storageKey}}, nil
 }
