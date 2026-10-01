@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,4 +29,24 @@ func (resolver PathResolver) DestinationPath(configuredPath string) string {
 // treated as relative to whatever root it's later joined under.
 func CleanConfiguredPath(configuredPath string) string {
 	return strings.TrimPrefix(filepath.Clean(configuredPath), string(os.PathSeparator))
+}
+
+// ValidateConfiguredPath rejects a configured path that, once cleaned,
+// would escape the root it's later joined under (e.g. "../etc") or resolve
+// to the whole root itself ("."), since either would let rsync --delete and
+// chown -R act outside a single container's data. An empty path is
+// rejected too, since filepath.Clean turns it into ".". A root-only path
+// ("/") is allowed: it cleans to "", which TransferService already skips
+// with a warning.
+func ValidateConfiguredPath(configuredPath string) error {
+	cleanPath := CleanConfiguredPath(configuredPath)
+	if cleanPath == "" {
+		return nil
+	}
+
+	if cleanPath == "." || !filepath.IsLocal(cleanPath) {
+		return fmt.Errorf("configured path %q must stay inside its root directory and cannot be the root itself", configuredPath)
+	}
+
+	return nil
 }

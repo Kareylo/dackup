@@ -54,6 +54,10 @@ func (service commandService) askContainerConfig(configured []string) (shared.Co
 		return shared.ContainerConfig{}, err
 	}
 
+	if err := validateConfiguredPaths(paths); err != nil {
+		return shared.ContainerConfig{}, err
+	}
+
 	contains, err := service.askContains(container, configured, nil)
 	if err != nil {
 		return shared.ContainerConfig{}, err
@@ -73,6 +77,19 @@ func (service commandService) askContainerConfig(configured []string) (shared.Co
 	}
 
 	return config, nil
+}
+
+// validateConfiguredPaths checks each entry of paths with
+// shared.ValidateConfiguredPath, so a path escaping its root is never
+// written to the config.
+func validateConfiguredPaths(paths []string) error {
+	for _, path := range paths {
+		if err := shared.ValidateConfiguredPath(path); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // askUpdatedContainerConfig prompts for currentConfig's new values,
@@ -99,6 +116,10 @@ func (service commandService) askUpdatedContainerConfig(
 
 	paths, err := service.prompt.StringListWithDefault("Backup paths, separated by commas", currentConfig.Paths)
 	if err != nil {
+		return shared.ContainerConfig{}, err
+	}
+
+	if err := validateConfiguredPaths(paths); err != nil {
 		return shared.ContainerConfig{}, err
 	}
 
