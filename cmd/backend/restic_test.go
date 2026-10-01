@@ -475,3 +475,12 @@ func TestPromptBackendSettings_InvalidCurrentResticSettingsFallBackToDefaults(t 
 		t.Fatalf("expected global_repo_name to fall back to default %q, got %v", restic.DefaultGlobalRepoName, settings["global_repo_name"])
 	}
 }
+
+func TestPromptResticSettings_PropagatesStorageTypeReadError(t *testing.T) {
+	// bin -> (empty), global_repo_name -> (default), then input ends.
+	service := newTestService("\n\n")
+
+	if _, err := service.promptResticSettings(restic.DefaultConfig()); err == nil {
+		t.Fatal("expected read error, got nil")
+	}
+}

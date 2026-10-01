@@ -6,9 +6,12 @@ import (
 	"strings"
 )
 
-// PromptService reads interactive terminal answers from Reader.
+// PromptService reads interactive terminal answers from Reader. When
+// Terminal is set, selection prompts read key presses from Reader in raw
+// mode instead of typed answers.
 type PromptService struct {
-	Reader *bufio.Reader
+	Reader   *bufio.Reader
+	Terminal Terminal
 }
 
 // NewPromptService returns a PromptService reading from reader.
@@ -66,10 +69,22 @@ func (service PromptService) StringWithDefault(label string, defaultValue string
 	return value, nil
 }
 
-// Bool prompts for a yes/no answer to label, showing defaultValue and
-// re-prompting until a recognized answer (or an empty one, which returns
-// defaultValue) is given.
+// Bool prompts for a yes/no answer to label. With a Terminal it shows a
+// Yes/No checkbox list with defaultValue ticked; otherwise it shows
+// defaultValue and re-prompts until a recognized answer (or an empty one,
+// which returns defaultValue) is given.
 func (service PromptService) Bool(label string, defaultValue bool) (bool, error) {
+	if service.Terminal != nil {
+		checked := []bool{defaultValue, !defaultValue}
+
+		checked, err := service.selectInteractive(label, []string{"Yes", "No"}, checked, false)
+		if err != nil {
+			return false, err
+		}
+
+		return checked[0], nil
+	}
+
 	defaultLabel := "y/N"
 	if defaultValue {
 		defaultLabel = "Y/n"

@@ -26,6 +26,9 @@ import (
 var (
 	configFilePath string
 	options        *shared.Options
+	// terminal enables checkbox selection prompts; nil (as in tests)
+	// falls back to typed answers.
+	terminal shared.Terminal
 )
 
 // commandService bundles the dependencies every backend subcommand needs:
@@ -43,6 +46,7 @@ type commandService struct {
 // dackup config file.
 func NewCommand(sharedOptions *shared.Options) *cobra.Command {
 	options = sharedOptions
+	terminal = shared.StdinTerminal()
 
 	var err error
 	configFilePath, err = shared.DefaultDackupConfigPath()
@@ -108,9 +112,12 @@ func NewCommand(sharedOptions *shared.Options) *cobra.Command {
 }
 
 func newCommandService(reader *bufio.Reader) commandService {
+	prompt := shared.NewPromptService(reader)
+	prompt.Terminal = terminal
+
 	return commandService{
 		options: options,
-		prompt:  shared.NewPromptService(reader),
+		prompt:  prompt,
 		secrets: shared.AESFileSecretStore{},
 		fs:      shared.OSFileSystem{},
 	}
@@ -284,7 +291,7 @@ func (service commandService) configureBackend(config shared.DackupConfig) (shar
 		return config, false, nil
 	}
 
-	name, err := service.selectBackendName(available)
+	name, err := service.selectBackendName(available, config.Backend)
 	if err != nil {
 		return config, false, err
 	}

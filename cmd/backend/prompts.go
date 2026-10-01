@@ -135,27 +135,9 @@ func (service commandService) promptOptionalStringWithCurrent(label string, curr
 }
 
 // selectBackendName prompts for one of the available backend names,
-// re-prompting until a listed one is chosen.
-func (service commandService) selectBackendName(available []string) (string, error) {
-	fmt.Println("Available backends:")
-	for index, name := range available {
-		fmt.Printf("%d. %s\n", index+1, name)
-	}
-
-	for {
-		choice, err := service.prompt.RequiredString("Backend name")
-		if err != nil {
-			return "", err
-		}
-
-		for _, name := range available {
-			if name == choice {
-				return name, nil
-			}
-		}
-
-		fmt.Println("Please choose one of the listed backend names.")
-	}
+// pre-selecting current (the configured backend, if any).
+func (service commandService) selectBackendName(available []string, current string) (string, error) {
+	return service.prompt.SelectOne("Backend name", available, current)
 }
 
 // promptBackendSettings gathers backend-specific settings, pre-filling from

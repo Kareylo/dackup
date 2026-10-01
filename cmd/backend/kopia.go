@@ -12,6 +12,7 @@ import (
 	"dackup/internal/backend/kopia/storage/webdav"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -126,10 +127,7 @@ func (service commandService) promptKopiaSettings(current kopia.Config) (json.Ra
 	}
 	config.EncryptedPassword = encryptedPassword
 
-	compression, err := service.promptOptionalStringWithCurrent(
-		"Kopia compression algorithm, e.g. zstd (leave empty for kopia's default)",
-		config.Compression,
-	)
+	compression, err := service.selectKopiaCompression(config.Compression)
 	if err != nil {
 		return nil, err
 	}
@@ -142,28 +140,63 @@ func (service commandService) promptKopiaSettings(current kopia.Config) (json.Ra
 	return json.Marshal(config)
 }
 
-// selectKopiaStorageType prompts for one of kopiaStorageTypes, re-prompting
-// until a listed one is chosen.
+// selectKopiaStorageType prompts for one of kopiaStorageTypes,
+// pre-selecting current.
 func (service commandService) selectKopiaStorageType(current string) (string, error) {
-	fmt.Println("Available kopia storage types:")
-	for _, storageType := range kopiaStorageTypes {
-		fmt.Printf("- %s\n", storageType)
+	return service.prompt.SelectOne("Kopia storage type", kopiaStorageTypes, current)
+}
+
+// kopiaDefaultCompression is the kopiaCompressionAlgorithms entry standing
+// for an empty kopia.Config.Compression, i.e. kopia's own default.
+const kopiaDefaultCompression = "default"
+
+// kopiaCompressionAlgorithms lists the compression choices
+// selectKopiaCompression offers: kopia's default, "none", then the
+// algorithms `kopia policy set --compression` accepts (as of kopia
+// v0.23.1), minus the unsupported lz4 and deprecated zstd-best-compression.
+var kopiaCompressionAlgorithms = []string{
+	kopiaDefaultCompression,
+	"none",
+	"deflate-best-compression",
+	"deflate-best-speed",
+	"deflate-default",
+	"gzip",
+	"gzip-best-compression",
+	"gzip-best-speed",
+	"pgzip",
+	"pgzip-best-compression",
+	"pgzip-best-speed",
+	"s2-better",
+	"s2-default",
+	"s2-parallel-4",
+	"s2-parallel-8",
+	"zstd",
+	"zstd-better-compression",
+	"zstd-fastest",
+}
+
+// selectKopiaCompression prompts for one of kopiaCompressionAlgorithms,
+// pre-selecting current, and returns "" for kopiaDefaultCompression. A
+// current algorithm that is not listed is offered too, so it can be kept.
+func (service commandService) selectKopiaCompression(current string) (string, error) {
+	options := kopiaCompressionAlgorithms
+
+	if current == "" {
+		current = kopiaDefaultCompression
+	} else if !slices.Contains(options, current) {
+		options = append(slices.Clone(options), current)
 	}
 
-	for {
-		choice, err := service.prompt.StringWithDefault("Kopia storage type", current)
-		if err != nil {
-			return "", err
-		}
-
-		for _, storageType := range kopiaStorageTypes {
-			if storageType == choice {
-				return choice, nil
-			}
-		}
-
-		fmt.Println("Please choose one of the listed storage types.")
+	choice, err := service.prompt.SelectOne("Kopia compression algorithm", options, current)
+	if err != nil {
+		return "", err
 	}
+
+	if choice == kopiaDefaultCompression {
+		return "", nil
+	}
+
+	return choice, nil
 }
 
 // promptKopiaS3Settings gathers s3.Storage's fields, using current (nil

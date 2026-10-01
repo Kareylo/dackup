@@ -41,3 +41,13 @@ func findContainerIndex(configs []shared.ContainerConfig, containerName string) 
 
 	return -1
 }
+
+func containerNames(configs []shared.ContainerConfig) []string {
+	names := make([]string, 0, len(configs))
+
+	for _, config := range configs {
+		names = append(names, config.Container)
+	}
+
+	return names
+}

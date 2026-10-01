@@ -142,27 +142,9 @@ func (service commandService) promptResticSettings(current restic.Config) (json.
 }
 
 // selectResticStorageType prompts for one of resticStorageTypes,
-// re-prompting until a listed one is chosen.
+// pre-selecting current.
 func (service commandService) selectResticStorageType(current string) (string, error) {
-	fmt.Println("Available restic storage types:")
-	for _, storageType := range resticStorageTypes {
-		fmt.Printf("- %s\n", storageType)
-	}
-
-	for {
-		choice, err := service.prompt.StringWithDefault("Restic storage type", current)
-		if err != nil {
-			return "", err
-		}
-
-		for _, storageType := range resticStorageTypes {
-			if storageType == choice {
-				return choice, nil
-			}
-		}
-
-		fmt.Println("Please choose one of the listed storage types.")
-	}
+	return service.prompt.SelectOne("Restic storage type", resticStorageTypes, current)
 }
 
 // promptResticS3Settings gathers s3.Storage's fields, using current (nil on

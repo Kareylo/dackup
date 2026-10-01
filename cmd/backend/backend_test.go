@@ -172,13 +172,39 @@ func TestPromptBinPath_EmptyInputKeepsCurrentValue(t *testing.T) {
 func TestSelectBackendName_RejectsUnknownThenAcceptsValid(t *testing.T) {
 	service := newTestService("bogus\nborg\n")
 
-	got, err := service.selectBackendName([]string{"borg"})
+	got, err := service.selectBackendName([]string{"borg"}, "")
 	if err != nil {
 		t.Fatalf("selectBackendName returned error: %v", err)
 	}
 
 	if got != "borg" {
 		t.Fatalf("expected %q, got %q", "borg", got)
+	}
+}
+
+func TestSelectBackendName_AcceptsListedNumber(t *testing.T) {
+	service := newTestService("2\n")
+
+	got, err := service.selectBackendName([]string{"borg", "kopia"}, "")
+	if err != nil {
+		t.Fatalf("selectBackendName returned error: %v", err)
+	}
+
+	if got != "kopia" {
+		t.Fatalf("expected %q, got %q", "kopia", got)
+	}
+}
+
+func TestSelectBackendName_EmptyKeepsCurrentBackend(t *testing.T) {
+	service := newTestService("\n")
+
+	got, err := service.selectBackendName([]string{"borg", "kopia"}, "kopia")
+	if err != nil {
+		t.Fatalf("selectBackendName returned error: %v", err)
+	}
+
+	if got != "kopia" {
+		t.Fatalf("expected %q, got %q", "kopia", got)
 	}
 }
 
@@ -316,6 +342,46 @@ func TestPromptBorgSettings_SwitchingToNoneEncryptionClearsPassphrase(t *testing
 
 	if value, ok := settings["encrypted_passphrase"]; ok && value != "" {
 		t.Fatalf("expected encrypted_passphrase to be cleared, got %v", value)
+	}
+}
+
+func TestPromptBorgSettings_EncryptionModeAcceptsListedNumber(t *testing.T) {
+	// bin -> (empty), global_repo_name -> (default), encryption -> 1 (none),
+	// compression -> (empty)
+	service := newTestServiceWithSecretKey(t, "\n\n1\n\n")
+
+	got, err := service.promptBorgSettings(borg.DefaultConfig())
+	if err != nil {
+		t.Fatalf("promptBorgSettings returned error: %v", err)
+	}
+
+	var settings map[string]any
+	if err := json.Unmarshal(got, &settings); err != nil {
+		t.Fatalf("failed to unmarshal settings: %v", err)
+	}
+
+	if settings["encryption"] != "none" {
+		t.Fatalf("expected encryption %q, got %v", "none", settings["encryption"])
+	}
+}
+
+func TestPromptBorgSettings_RejectsUnlistedEncryptionMode(t *testing.T) {
+	// bin -> (empty), global_repo_name -> (default), encryption -> bogus
+	// (rejected) then none, compression -> (empty)
+	service := newTestServiceWithSecretKey(t, "\n\nbogus\nnone\n\n")
+
+	got, err := service.promptBorgSettings(borg.DefaultConfig())
+	if err != nil {
+		t.Fatalf("promptBorgSettings returned error: %v", err)
+	}
+
+	var settings map[string]any
+	if err := json.Unmarshal(got, &settings); err != nil {
+		t.Fatalf("failed to unmarshal settings: %v", err)
+	}
+
+	if settings["encryption"] != "none" {
+		t.Fatalf("expected encryption %q, got %v", "none", settings["encryption"])
 	}
 }
 
@@ -1114,5 +1180,145 @@ func TestMaskEncryptedSettings_MasksEncryptedFieldsOnly(t *testing.T) {
 
 	if fields["encrypted_passphrase"] != "[set]" {
 		t.Fatalf("expected encrypted_passphrase to be masked, got %q", fields["encrypted_passphrase"])
+	}
+}
+
+func TestSelectKopiaCompression_EmptyKeepsKopiaDefault(t *testing.T) {
+	service := newTestService("\n")
+
+	got, err := service.selectKopiaCompression("")
+	if err != nil {
+		t.Fatalf("selectKopiaCompression returned error: %v", err)
+	}
+
+	if got != "" {
+		t.Fatalf("expected empty compression (kopia's default), got %q", got)
+	}
+}
+
+func TestSelectKopiaCompression_AcceptsListedAlgorithm(t *testing.T) {
+	service := newTestService("zstd\n")
+
+	got, err := service.selectKopiaCompression("")
+	if err != nil {
+		t.Fatalf("selectKopiaCompression returned error: %v", err)
+	}
+
+	if got != "zstd" {
+		t.Fatalf("expected %q, got %q", "zstd", got)
+	}
+}
+
+func TestSelectKopiaCompression_RejectsUnlistedAlgorithm(t *testing.T) {
+	service := newTestService("bogus\nnone\n")
+
+	got, err := service.selectKopiaCompression("")
+	if err != nil {
+		t.Fatalf("selectKopiaCompression returned error: %v", err)
+	}
+
+	if got != "none" {
+		t.Fatalf("expected %q, got %q", "none", got)
+	}
+}
+
+func TestSelectKopiaCompression_DefaultOptionClearsCurrentAlgorithm(t *testing.T) {
+	service := newTestService("default\n")
+
+	got, err := service.selectKopiaCompression("zstd")
+	if err != nil {
+		t.Fatalf("selectKopiaCompression returned error: %v", err)
+	}
+
+	if got != "" {
+		t.Fatalf("expected empty compression, got %q", got)
+	}
+}
+
+func TestSelectKopiaCompression_KeepsCurrentUnlistedAlgorithm(t *testing.T) {
+	service := newTestService("\n")
+
+	got, err := service.selectKopiaCompression("zstd-best-compression")
+	if err != nil {
+		t.Fatalf("selectKopiaCompression returned error: %v", err)
+	}
+
+	if got != "zstd-best-compression" {
+		t.Fatalf("expected current %q to be kept, got %q", "zstd-best-compression", got)
+	}
+}
+
+func TestNewCommand_RegistersSubcommands(t *testing.T) {
+	originalOptions, originalTerminal := options, terminal
+	t.Cleanup(func() {
+		options, terminal = originalOptions, originalTerminal
+	})
+
+	cmd := NewCommand(&shared.Options{})
+
+	if len(cmd.Commands()) != 4 {
+		t.Fatalf("expected 4 backend subcommands, got %d", len(cmd.Commands()))
+	}
+}
+
+func TestNewCommandService_UsesPackageTerminal(t *testing.T) {
+	originalTerminal := terminal
+	t.Cleanup(func() { terminal = originalTerminal })
+
+	terminal = fakeTerminal{}
+
+	service := newCommandService(bufio.NewReader(strings.NewReader("")))
+	if service.prompt.Terminal != terminal {
+		t.Fatalf("expected prompt terminal %#v, got %#v", terminal, service.prompt.Terminal)
+	}
+}
+
+type fakeTerminal struct{}
+
+func (fakeTerminal) MakeRaw() (func() error, error) {
+	return func() error { return nil }, nil
+}
+
+func TestConfigureBackend_PropagatesBackendNameReadError(t *testing.T) {
+	service := newTestService("")
+
+	if _, _, err := service.configureBackend(shared.DackupConfig{}); err == nil {
+		t.Fatal("expected read error, got nil")
+	}
+}
+
+func TestPromptBorgSettings_PropagatesEncryptionModeReadError(t *testing.T) {
+	// bin -> (empty), global_repo_name -> (default), then input ends.
+	service := newTestService("\n\n")
+
+	if _, err := service.promptBorgSettings(borg.DefaultConfig()); err == nil {
+		t.Fatal("expected read error, got nil")
+	}
+}
+
+func TestPromptKopiaSettings_PropagatesStorageTypeReadError(t *testing.T) {
+	// bin -> (empty), global_repo_name -> (default), then input ends.
+	service := newTestService("\n\n")
+
+	if _, err := service.promptKopiaSettings(kopia.DefaultConfig()); err == nil {
+		t.Fatal("expected read error, got nil")
+	}
+}
+
+func TestPromptKopiaSettings_PropagatesCompressionReadError(t *testing.T) {
+	// bin -> (empty), global_repo_name -> (default), storage_type ->
+	// (default, filesystem), password -> hunter2, then input ends.
+	service := newTestServiceWithSecretKey(t, "\n\n\nhunter2\n")
+
+	if _, err := service.promptKopiaSettings(kopia.DefaultConfig()); err == nil {
+		t.Fatal("expected read error, got nil")
+	}
+}
+
+func TestSelectKopiaCompression_PropagatesReadError(t *testing.T) {
+	service := newTestService("")
+
+	if _, err := service.selectKopiaCompression(""); err == nil {
+		t.Fatal("expected read error, got nil")
 	}
 }

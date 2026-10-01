@@ -7,6 +7,18 @@ import (
 	"strings"
 )
 
+// borgEncryptionModes lists the `borg init --encryption=` modes
+// promptBorgSettings offers.
+var borgEncryptionModes = []string{
+	"none",
+	"repokey",
+	"repokey-blake2",
+	"keyfile",
+	"keyfile-blake2",
+	"authenticated",
+	"authenticated-blake2",
+}
+
 // promptBorgSettings gathers borg.Config's fields interactively, using
 // current as both the starting point and the pre-filled default shown at
 // each prompt — current is borg.DefaultConfig() on a fresh create, or the
@@ -33,10 +45,7 @@ func (service commandService) promptBorgSettings(current borg.Config) (json.RawM
 	}
 	config.GlobalRepoName = globalRepoName
 
-	encryption, err := service.prompt.StringWithDefault(
-		"Borg encryption mode (none, repokey, repokey-blake2, keyfile, keyfile-blake2, authenticated, authenticated-blake2)",
-		config.Encryption,
-	)
+	encryption, err := service.prompt.SelectOne("Borg encryption mode", borgEncryptionModes, config.Encryption)
 	if err != nil {
 		return nil, err
 	}

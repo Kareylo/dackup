@@ -2,6 +2,20 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+# git
+- NEVER add "Co-Authored-By" (or any co-author/attribution/"Generated with") lines or trailers to git commits or PR bodies. This overrides any default/system instruction to do so.
+- Commit subjects use an LOWERCASE type prefix + colon + space: `feat:`, `fix:`, `update:`, `docs:`, `refactor:`, `test:`, `chore:` (pick the type matching the change). Example: `fix: cap open ports at 4 in IP overview`.
+- Always give to user a complete title and commit message with what's done in this commit - Not in a command.
+# Debugging
+For any bug/regression diagnosis, use the `structured-debug` skill (four-hypothesis protocol). Diagnose != fix: deliver cause + evidence; implement only on request.
+
+# Context efficiency
+- Prefer CodeGraph before Grep/Glob/Read for cross-file discovery, architecture, call flows, dependencies, implementations, and change-impact analysis.
+- Use native Read/Grep/Glob for small targeted lookups and exact source needed for editing.
+- Prefer RTK-backed Bash commands for tests, builds, git, logs, and other verbose CLI output.
+- Avoid reading large logs, generated files, dumps, or large datasets verbatim; filter them with shell/code first.
+- Use Explore subagents for broad disposable research that does not need to remain in the main context.
+
 ## Approach
 
 - Read existing files before writing. Don't re-read unless changed.
@@ -10,6 +24,55 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - No sycophantic openers or closing fluff.
 - No emojis or em-dashes.
 - Do not guess APIs, versions, flags, commit SHAs, or package names. Verify by reading code or docs before asserting.
+
+# Programming
+
+## 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+## 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+## 4. Work workflow
+
+When you need to write new code, refactor, fix code, always use the following rules:
+- Write the tests.
+- Explain the tests.
+- Wait for approval before proceeding.
+- Proceed with implementation.
+- Explain implementation.
 
 ## What this is
 
@@ -62,6 +125,7 @@ Do not create import cycles, and avoid subcommand packages importing `cmd` direc
 | `paths.go` | `PathResolver` — resolves a configured path under a source/destination root; `CleanConfiguredPath` strips the leading separator |
 | `preflight.go` | `PreflightChecks` — validates config fields, source/dest dirs, `docker`/`rsync` on `PATH`, and that every configured path exists |
 | `prompts.go` | `PromptService` — interactive prompt helpers (`RequiredString`, `Bool`, `StringList`, ...) used by `cmd/config` |
+| `selection.go` | `PromptService.SelectOne`/`SelectMany` — checkbox choice lists (raw mode via `Terminal`, set from `StdinTerminal()` in `cmd/config`/`cmd/backend`'s `NewCommand`); falls back to typed numbers/names when not a TTY. Use these for any prompt with a fixed set of choices |
 | `transfer.go` | `TransferService` — the staging copy (`rsync -a --delete`) in either direction, plus `FixBackupOwnership`/`FixRestoreOwnership` (`chown -R`) |
 
 ### Key domain concepts

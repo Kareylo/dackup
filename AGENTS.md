@@ -154,6 +154,8 @@ The project is organized around top-level Cobra commands:
 │   ├── prompts.go
 │   ├── secrets.go
 │   ├── secrets_test.go
+│   ├── selection.go
+│   ├── selection_test.go
 │   ├── shared.go
 │   ├── shared_test.go
 │   ├── transfer.go
@@ -207,6 +209,7 @@ Shared infrastructure is split by concern:
 - `paths.go` — path normalization and path resolution.
 - `preflight.go` — prerequisite validation.
 - `prompts.go` — interactive terminal prompting.
+- `selection.go` — single/multi choice prompts: checkbox lists in a terminal, numbered typed answers otherwise.
 - `transfer.go` — staging data transfer and ownership operations.
 - `shared.go` — shared config types and config file read/write helpers.
 

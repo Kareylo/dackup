@@ -14,7 +14,7 @@ func (service commandService) askContainers() ([]shared.ContainerConfig, error) 
 	fmt.Println()
 
 	for {
-		config, err := service.askContainerConfig()
+		config, err := service.askContainerConfig(containerNames(configs))
 		if err != nil {
 			return nil, err
 		}
@@ -36,7 +36,9 @@ func (service commandService) askContainers() ([]shared.ContainerConfig, error) 
 	return configs, nil
 }
 
-func (service commandService) askContainerConfig() (shared.ContainerConfig, error) {
+// askContainerConfig prompts for a new container, offering configured (the
+// already configured container names) as contains choices.
+func (service commandService) askContainerConfig(configured []string) (shared.ContainerConfig, error) {
 	container, err := service.prompt.RequiredString("Container name")
 	if err != nil {
 		return shared.ContainerConfig{}, err
@@ -52,7 +54,7 @@ func (service commandService) askContainerConfig() (shared.ContainerConfig, erro
 		return shared.ContainerConfig{}, err
 	}
 
-	contains, err := service.prompt.StringList("Contained/dependent containers, separated by commas. Leave empty if none")
+	contains, err := service.askContains(container, configured, nil)
 	if err != nil {
 		return shared.ContainerConfig{}, err
 	}
@@ -73,8 +75,11 @@ func (service commandService) askContainerConfig() (shared.ContainerConfig, erro
 	return config, nil
 }
 
+// askUpdatedContainerConfig prompts for currentConfig's new values,
+// offering configured (the configured container names) as contains choices.
 func (service commandService) askUpdatedContainerConfig(
 	currentConfig shared.ContainerConfig,
+	configured []string,
 ) (shared.ContainerConfig, error) {
 	fmt.Printf("Updating container %q. Press Enter to keep the current value.\n", currentConfig.Container)
 	fmt.Println()
@@ -97,7 +102,7 @@ func (service commandService) askUpdatedContainerConfig(
 		return shared.ContainerConfig{}, err
 	}
 
-	contains, err := service.prompt.StringListWithDefault("Contained/dependent containers, separated by commas", currentConfig.Contains)
+	contains, err := service.askContains(container, configured, currentConfig.Contains)
 	if err != nil {
 		return shared.ContainerConfig{}, err
 	}
@@ -116,6 +121,26 @@ func (service commandService) askUpdatedContainerConfig(
 	}
 
 	return updatedConfig, nil
+}
+
+// askContains lets the user tick container's contained containers among
+// configured (container itself excluded) plus current, so a current entry
+// that is not configured can still be kept or unticked. It is skipped, with
+// nothing contained, when there is nothing to choose from.
+func (service commandService) askContains(container string, configured []string, current []string) ([]string, error) {
+	var choices []string
+
+	for _, name := range append(append([]string{}, configured...), current...) {
+		if name != container && !containsString(choices, name) {
+			choices = append(choices, name)
+		}
+	}
+
+	if len(choices) == 0 {
+		return nil, nil
+	}
+
+	return service.prompt.SelectMany("Contained/dependent containers", choices, current)
 }
 
 func askStringWithDefault(reader *bufio.Reader, label string, defaultValue string) (string, error) {

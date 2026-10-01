@@ -19,6 +19,9 @@ const (
 var (
 	configFilePath string
 	options        *shared.Options
+	// terminal enables checkbox selection prompts; nil (as in tests)
+	// falls back to typed answers.
+	terminal shared.Terminal
 )
 
 type commandService struct {
@@ -30,6 +33,7 @@ type commandService struct {
 // list/use-file subcommands.
 func NewCommand(sharedOptions *shared.Options) *cobra.Command {
 	options = sharedOptions
+	terminal = shared.StdinTerminal()
 
 	var err error
 	configFilePath, err = shared.DefaultDackupConfigPath()
@@ -118,9 +122,12 @@ The custom file path is stored in the main dackup config file, usually ~/.config
 }
 
 func newCommandService(reader *bufio.Reader) commandService {
+	prompt := shared.NewPromptService(reader)
+	prompt.Terminal = terminal
+
 	return commandService{
 		options: options,
-		prompt:  shared.NewPromptService(reader),
+		prompt:  prompt,
 	}
 }
 
@@ -267,7 +274,7 @@ func runConfigAddContainerWithReader(reader *bufio.Reader) error {
 		return err
 	}
 
-	config, err := service.askContainerConfig()
+	config, err := service.askContainerConfig(containerNames(configs))
 	if err != nil {
 		return err
 	}
@@ -311,7 +318,7 @@ func runConfigUpdateContainerWithReader(reader *bufio.Reader) error {
 
 	printContainers(configs)
 
-	selectedContainer, err := service.prompt.RequiredString("Container to update")
+	selectedContainer, err := service.prompt.SelectOne("Container to update", containerNames(configs), "")
 	if err != nil {
 		return err
 	}
@@ -321,7 +328,7 @@ func runConfigUpdateContainerWithReader(reader *bufio.Reader) error {
 		return fmt.Errorf("container %q was not found in %s", selectedContainer, effectiveConfigPath)
 	}
 
-	updatedConfig, err := service.askUpdatedContainerConfig(configs[selectedIndex])
+	updatedConfig, err := service.askUpdatedContainerConfig(configs[selectedIndex], containerNames(configs))
 	if err != nil {
 		return err
 	}
@@ -369,7 +376,7 @@ func runConfigRemoveContainerWithReader(reader *bufio.Reader) error {
 
 	printContainers(configs)
 
-	selectedContainer, err := service.prompt.RequiredString("Container to remove")
+	selectedContainer, err := service.prompt.SelectOne("Container to remove", containerNames(configs), "")
 	if err != nil {
 		return err
 	}
