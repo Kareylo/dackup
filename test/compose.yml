@@ -18,40 +18,45 @@ services:
     command: ["sleep", "infinity"]
     volumes:
       - ./volumes/test_broker_data:/config
-  test_minio:
-    image: minio/minio
-    container_name: test_minio
-    # networks.default.aliases: "test_minio" (the service/container name)
-    # has an underscore, which isn't a valid DNS hostname per RFC 1123 —
-    # Docker's own internal resolver is lenient about it, but S3 clients
-    # like mc/MinIO's own tooling strictly validate hostnames and reject it
-    # ("Invalid Request (invalid hostname)"), so scripts/init-minio.sh (run
-    # from inside the docker network) addresses this container as "minio"
-    # instead.
+  # test_s3 is the S3-compatible server for kopia's and restic's s3
+  # storage types: versitygw serving a plain directory (posix backend).
+  # The official minio/minio and minio/mc images were removed from Docker
+  # Hub, so both images below are pinned to a published tag. The root
+  # credentials stay "minioadmin"/"minioadmin" because that's what
+  # test/config.s3.json and test/config.restic-s3.json already encode
+  # (encrypted with test/secret.key).
+  test_s3:
+    image: versity/versitygw:v1.8.0
+    container_name: test_s3
+    # networks.default.aliases: "test_s3" (the service/container name) has
+    # an underscore, which isn't a valid DNS hostname per RFC 1123 — Docker's
+    # own internal resolver is lenient about it, but S3 clients strictly
+    # validate hostnames and reject it ("Invalid Request (invalid
+    # hostname)"), so scripts/init-s3.sh (run from inside the docker
+    # network) addresses this container as "s3" instead.
     networks:
       default:
         aliases:
-          - minio
-    command: server /data --console-address ":9001"
-    environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
+          - s3
+    command: --port :9000 --access minioadmin --secret minioadmin posix /data
     ports:
       - "9000:9000"
-      - "9001:9001"
     volumes:
-      - test_minio_data:/data
-  # test_minio_init creates the "dackup-test" bucket kopia's s3 storage type
-  # expects (test/config.s3.json) — see scripts/init-minio.sh. It's a
-  # one-shot container (exits once the bucket exists), not a long-running
-  # service.
-  test_minio_init:
-    image: minio/mc
-    container_name: test_minio_init
+      - test_s3_data:/data
+  # test_s3_init creates the "dackup-test" bucket kopia's and restic's s3
+  # storage types expect — see scripts/init-s3.sh. It's a one-shot
+  # container (exits once the bucket exists), not a long-running service.
+  test_s3_init:
+    image: amazon/aws-cli:2.37.7
+    container_name: test_s3_init
     depends_on:
-      - test_minio
+      - test_s3
+    environment:
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+      - AWS_DEFAULT_REGION=us-east-1
     volumes:
-      - ./scripts/init-minio.sh:/init.sh:ro
+      - ./scripts/init-s3.sh:/init.sh:ro
     entrypoint: ["/bin/sh", "/init.sh"]
     restart: "no"
   # test_sftp_init chowns the test_sftp_upload volume to the sftp user
@@ -108,7 +113,7 @@ services:
     image: mcr.microsoft.com/azure-storage/azurite
     container_name: test_azurite
     # networks.default.aliases: same underscore-in-hostname issue as
-    # test_minio above — test_azurite_init addresses this container as
+    # test_s3 above — test_azurite_init addresses this container as
     # "azurite" instead.
     networks:
       default:
@@ -242,7 +247,7 @@ services:
     environment:
       - COVERAGE_THRESHOLD=80
     depends_on:
-      test_minio_init:
+      test_s3_init:
         condition: service_completed_successfully
       test_azurite_init:
         condition: service_completed_successfully
@@ -262,7 +267,7 @@ volumes:
   test_config:
   test_db_data:
   test_broker_data:
-  test_minio_data:
+  test_s3_data:
   test_sftp_upload:
   test_webdav_data:
   test_azurite_data:

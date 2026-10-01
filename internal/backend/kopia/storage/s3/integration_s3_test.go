@@ -16,7 +16,7 @@ import (
 	"testing"
 )
 
-// TestIntegration_S3 backs up to and restores from the test_minio service
+// TestIntegration_S3 backs up to and restores from the test_s3 service
 // in test/compose.yml, using test/config.s3.json.
 func TestIntegration_S3(t *testing.T) {
 	kopia.RequireKopiaBinary(t)
