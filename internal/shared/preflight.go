@@ -8,8 +8,9 @@ import (
 // PreflightChecks validates that action (backup or restore) can proceed:
 // the effective config file exists, config.User/Group are set, the source/
 // destination/backend roots exist as directories, docker and rsync are on
-// PATH, and every configured path in configs resolves (via resolver) to an
-// existing source directory. fs/runner default to their real
+// PATH, and every configured path in configs stays inside its root (see
+// ValidateConfiguredPath) and resolves (via resolver) to an existing source
+// directory. fs/runner default to their real
 // implementations when nil.
 func PreflightChecks(
 	action string,
@@ -69,6 +70,10 @@ func PreflightChecks(
 
 	for _, containerConfig := range configs {
 		for _, path := range containerConfig.Paths {
+			if err := ValidateConfiguredPath(path); err != nil {
+				return fmt.Errorf("invalid %s path for container %s: %w", action, containerConfig.Container, err)
+			}
+
 			srcPath := resolver.SourcePath(path)
 
 			info, err := fs.Stat(srcPath)

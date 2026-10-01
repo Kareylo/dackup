@@ -575,3 +575,61 @@ func TestRunConfigRemoveContainerWithReader_PropagatesSelectionReadError(t *test
 		t.Fatal("expected read error, got nil")
 	}
 }
+
+func TestRunConfigAddContainerWithReader_RejectsPathEscapingRoot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	withConfigFilePath(t, path)
+
+	seed := shared.DackupConfig{
+		User:       "owner",
+		Group:      "group",
+		Containers: []shared.ContainerConfig{{Container: "existing", ToStop: true}},
+	}
+	if err := shared.WriteDackupConfig(path, seed, nil); err != nil {
+		t.Fatalf("failed to seed existing config: %v", err)
+	}
+
+	// name, to_stop, paths (escaping the root), contains
+	input := "newcontainer\nn\n/app,../../etc\n\n"
+
+	if err := runConfigAddContainerWithReader(readerFor(input)); err == nil {
+		t.Fatal("expected an error for a path escaping the root")
+	}
+
+	configs, err := shared.ReadContainerConfigsFromPath(path)
+	if err != nil {
+		t.Fatalf("failed to read containers: %v", err)
+	}
+	if !reflect.DeepEqual(configs, seed.Containers) {
+		t.Fatalf("expected config to be left unchanged, got %#v", configs)
+	}
+}
+
+func TestRunConfigUpdateContainerWithReader_RejectsPathEscapingRoot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	withConfigFilePath(t, path)
+
+	seed := shared.DackupConfig{
+		User:       "owner",
+		Group:      "group",
+		Containers: []shared.ContainerConfig{{Container: "web", ToStop: true, Paths: []string{"/data"}}},
+	}
+	if err := shared.WriteDackupConfig(path, seed, nil); err != nil {
+		t.Fatalf("failed to seed existing config: %v", err)
+	}
+
+	// container to update, keep name, keep to_stop, paths (escaping the root), keep contains
+	input := "web\n\n\n../etc\n\n"
+
+	if err := runConfigUpdateContainerWithReader(readerFor(input)); err == nil {
+		t.Fatal("expected an error for a path escaping the root")
+	}
+
+	configs, err := shared.ReadContainerConfigsFromPath(path)
+	if err != nil {
+		t.Fatalf("failed to read containers: %v", err)
+	}
+	if !reflect.DeepEqual(configs, seed.Containers) {
+		t.Fatalf("expected config to be left unchanged, got %#v", configs)
+	}
+}

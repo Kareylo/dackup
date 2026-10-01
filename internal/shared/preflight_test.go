@@ -3,6 +3,7 @@ package shared
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -232,5 +233,34 @@ func TestPreflightChecks_ConfiguredPathIsAFileReturnsError(t *testing.T) {
 
 	if err := fixture.run(); err == nil {
 		t.Fatal("expected an error when a configured path resolves to a file, not a directory")
+	}
+}
+
+func TestPreflightChecks_ConfiguredPathEscapingRootReturnsError(t *testing.T) {
+	fixture := newPreflightFixture(t)
+
+	// Make the escaped target exist, so the error can only come from the
+	// traversal check, not from the "path does not exist" check.
+	outside := filepath.Join(filepath.Dir(fixture.sourceRoot), "outside")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatalf("failed to create %s: %v", outside, err)
+	}
+	fixture.configs = []ContainerConfig{{Container: "app", Paths: []string{"../outside"}}}
+
+	err := fixture.run()
+	if err == nil {
+		t.Fatal("expected an error for a configured path escaping the source root")
+	}
+	if !strings.Contains(err.Error(), "app") || !strings.Contains(err.Error(), "../outside") {
+		t.Fatalf("expected error to name the container and path, got %v", err)
+	}
+}
+
+func TestPreflightChecks_ConfiguredPathResolvingToWholeRootReturnsError(t *testing.T) {
+	fixture := newPreflightFixture(t)
+	fixture.configs = []ContainerConfig{{Container: "app", Paths: []string{"."}}}
+
+	if err := fixture.run(); err == nil {
+		t.Fatal("expected an error for a configured path resolving to the whole source root")
 	}
 }
