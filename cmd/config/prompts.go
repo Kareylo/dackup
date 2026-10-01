@@ -44,6 +44,10 @@ func (service commandService) askContainerConfig(configured []string) (shared.Co
 		return shared.ContainerConfig{}, err
 	}
 
+	if err := shared.ValidateContainerName(container); err != nil {
+		return shared.ContainerConfig{}, err
+	}
+
 	toStop, err := service.prompt.Bool("Stop this container before backup?", false)
 	if err != nil {
 		return shared.ContainerConfig{}, err
@@ -103,6 +107,10 @@ func (service commandService) askUpdatedContainerConfig(
 
 	container, err := service.prompt.StringWithDefault("Container name", currentConfig.Container)
 	if err != nil {
+		return shared.ContainerConfig{}, err
+	}
+
+	if err := shared.ValidateContainerName(container); err != nil {
 		return shared.ContainerConfig{}, err
 	}
 

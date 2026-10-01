@@ -8,7 +8,9 @@ import (
 // PreflightChecks validates that action (backup or restore) can proceed:
 // the effective config file exists, config.User/Group are set, the source/
 // destination/backend roots exist as directories, docker and rsync are on
-// PATH, and every configured path in configs stays inside its root (see
+// PATH, every container name and contains entry in configs is a valid
+// Docker name (see ValidateContainerName), and every configured path in
+// configs stays inside its root (see
 // ValidateConfiguredPath) and resolves (via resolver) to an existing source
 // directory. fs/runner default to their real
 // implementations when nil.
@@ -66,6 +68,18 @@ func PreflightChecks(
 
 	if _, err := runner.LookPath("rsync"); err != nil {
 		return fmt.Errorf("rsync not found; please install rsync")
+	}
+
+	for _, containerConfig := range configs {
+		if err := ValidateContainerName(containerConfig.Container); err != nil {
+			return err
+		}
+
+		for _, contained := range containerConfig.Contains {
+			if err := ValidateContainerName(contained); err != nil {
+				return fmt.Errorf("invalid contains entry for container %s: %w", containerConfig.Container, err)
+			}
+		}
 	}
 
 	for _, containerConfig := range configs {

@@ -264,3 +264,29 @@ func TestPreflightChecks_ConfiguredPathResolvingToWholeRootReturnsError(t *testi
 		t.Fatal("expected an error for a configured path resolving to the whole source root")
 	}
 }
+
+func TestPreflightChecks_InvalidContainerNameReturnsError(t *testing.T) {
+	fixture := newPreflightFixture(t)
+	fixture.configs = []ContainerConfig{{Container: "../x", Paths: []string{"/app"}}}
+
+	err := fixture.run()
+	if err == nil {
+		t.Fatal("expected an error for an invalid container name")
+	}
+	if !strings.Contains(err.Error(), "../x") {
+		t.Fatalf("expected error to name the invalid container, got %v", err)
+	}
+}
+
+func TestPreflightChecks_InvalidContainsEntryReturnsError(t *testing.T) {
+	fixture := newPreflightFixture(t)
+	fixture.configs = []ContainerConfig{{Container: "app", Paths: []string{"/app"}, Contains: []string{".*"}}}
+
+	err := fixture.run()
+	if err == nil {
+		t.Fatal("expected an error for an invalid contains entry")
+	}
+	if !strings.Contains(err.Error(), ".*") {
+		t.Fatalf("expected error to name the invalid contains entry, got %v", err)
+	}
+}

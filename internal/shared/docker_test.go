@@ -128,3 +128,57 @@ func TestDockerService_ContainerRunning_UsesOSCommandRunnerWhenRunnerIsUnset(t *
 		t.Logf("ContainerRunning returned error (expected if no docker daemon is running): %v", err)
 	}
 }
+
+func TestValidateContainerName_AcceptsDockerNames(t *testing.T) {
+	for _, name := range []string{"a", "app", "A1", "my_app.v2-1", "paperless-ngx", "db.1"} {
+		if err := ValidateContainerName(name); err != nil {
+			t.Errorf("ValidateContainerName(%q) returned error %v, want nil", name, err)
+		}
+	}
+}
+
+func TestValidateContainerName_RejectsUnsafeNames(t *testing.T) {
+	for _, name := range []string{"", "..", "../x", "x/y", "/app", ".hidden", "-rm", "_x", ".*", "a b", "a$", "app\n", "a|b"} {
+		if err := ValidateContainerName(name); err == nil {
+			t.Errorf("ValidateContainerName(%q) returned nil, want an error", name)
+		}
+	}
+}
+
+// recordingDockerRunner records the args of every Output call.
+type recordingDockerRunner struct {
+	calls *[][]string
+}
+
+func (runner recordingDockerRunner) Run(name string, args ...string) error { return nil }
+
+func (runner recordingDockerRunner) Output(name string, args ...string) ([]byte, error) {
+	*runner.calls = append(*runner.calls, args)
+	return nil, nil
+}
+
+func (runner recordingDockerRunner) LookPath(file string) (string, error) { return file, nil }
+
+func TestDockerService_QuotesContainerNameInFilter(t *testing.T) {
+	var calls [][]string
+	service := DockerService{Runner: recordingDockerRunner{calls: &calls}}
+
+	if _, err := service.ContainerRunning("db.1"); err != nil {
+		t.Fatalf("ContainerRunning returned error: %v", err)
+	}
+
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 docker call, got %d", len(calls))
+	}
+
+	want := `name=^/db\.1$`
+	found := false
+	for _, arg := range calls[0] {
+		if arg == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected filter arg %q in %v", want, calls[0])
+	}
+}
