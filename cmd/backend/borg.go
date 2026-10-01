@@ -59,7 +59,7 @@ func (service commandService) promptBorgSettings(current borg.Config) (json.RawM
 			passphraseLabel = "Borg repository passphrase (leave empty to keep the current one)"
 		}
 
-		passphrase, err := service.prompt.String(passphraseLabel)
+		passphrase, err := service.prompt.Secret(passphraseLabel)
 		if err != nil {
 			return nil, err
 		}

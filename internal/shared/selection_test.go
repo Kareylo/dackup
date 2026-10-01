@@ -3,6 +3,7 @@ package shared
 import (
 	"bufio"
 	"errors"
+	"io"
 	"os"
 	"reflect"
 	"strings"
@@ -420,4 +421,125 @@ func withStdio(t *testing.T, stdin *os.File, stdout *os.File) {
 	t.Cleanup(func() {
 		os.Stdin, os.Stdout = originalStdin, originalStdout
 	})
+}
+
+// --- Secret ---
+
+func TestSecret_WithoutTerminalReadsTrimmedLine(t *testing.T) {
+	service := NewPromptService(bufio.NewReader(strings.NewReader(" hunter2 \n")))
+
+	got, err := service.Secret("Password")
+	if err != nil {
+		t.Fatalf("Secret returned error: %v", err)
+	}
+	if got != "hunter2" {
+		t.Fatalf("expected %q, got %q", "hunter2", got)
+	}
+}
+
+func TestSecret_WithTerminalDoesNotEchoInput(t *testing.T) {
+	service, terminal := newInteractivePromptService("hunter2\r")
+
+	var got string
+	output := captureStdout(t, func() {
+		var err error
+		got, err = service.Secret("Password")
+		if err != nil {
+			t.Fatalf("Secret returned error: %v", err)
+		}
+	})
+
+	if got != "hunter2" {
+		t.Fatalf("expected %q, got %q", "hunter2", got)
+	}
+	if strings.Contains(output, "hunter2") {
+		t.Fatalf("expected the secret not to be echoed, got output %q", output)
+	}
+	if !strings.Contains(output, "Password") {
+		t.Fatalf("expected the label to be printed, got output %q", output)
+	}
+	if terminal.rawCalls != 1 || terminal.restoreCalls != 1 {
+		t.Fatalf("expected raw mode entered and restored once, got %d/%d", terminal.rawCalls, terminal.restoreCalls)
+	}
+}
+
+func TestSecret_WithTerminalHandlesLineEditing(t *testing.T) {
+	testCases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"newline ends input", "abc\n", "abc"},
+		{"DEL removes last char", "hunterx\x7f2\r", "hunter2"},
+		{"BS removes last char", "hunterx\x082\r", "hunter2"},
+		{"backspace on empty is a no-op", "\x7fab\r", "ab"},
+		{"backspace removes a whole multibyte rune", "pé\x7f\r", "p"},
+		{"arrow keys are ignored", "a\x1b[Ab\x1b[Dc\r", "abc"},
+		{"surrounding spaces are trimmed like String", " ab \r", "ab"},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			service, _ := newInteractivePromptService(testCase.input)
+
+			var got string
+			captureStdout(t, func() {
+				var err error
+				got, err = service.Secret("Password")
+				if err != nil {
+					t.Fatalf("Secret returned error: %v", err)
+				}
+			})
+
+			if got != testCase.want {
+				t.Fatalf("expected %q, got %q", testCase.want, got)
+			}
+		})
+	}
+}
+
+func TestSecret_WithTerminalCtrlCInterruptsAndRestores(t *testing.T) {
+	service, terminal := newInteractivePromptService("hun\x03")
+
+	var err error
+	captureStdout(t, func() {
+		_, err = service.Secret("Password")
+	})
+
+	if !errors.Is(err, ErrPromptInterrupted) {
+		t.Fatalf("expected ErrPromptInterrupted, got %v", err)
+	}
+	if terminal.restoreCalls != 1 {
+		t.Fatalf("expected terminal restored once, got %d", terminal.restoreCalls)
+	}
+}
+
+func TestSecret_WithTerminalEOFBeforeEnterReturnsErrorAndRestores(t *testing.T) {
+	service, terminal := newInteractivePromptService("hunter2")
+
+	var err error
+	captureStdout(t, func() {
+		_, err = service.Secret("Password")
+	})
+
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("expected io.EOF, got %v", err)
+	}
+	if terminal.restoreCalls != 1 {
+		t.Fatalf("expected terminal restored once, got %d", terminal.restoreCalls)
+	}
+}
+
+func TestSecret_RawModeFailureReturnsError(t *testing.T) {
+	service := NewPromptService(bufio.NewReader(strings.NewReader("hunter2\r")))
+	service.Terminal = failingTerminal{}
+
+	var err error
+	captureStdout(t, func() {
+		_, err = service.Secret("Password")
+	})
+
+	if err == nil {
+		t.Fatal("expected an error when raw mode is unavailable")
+	}
 }

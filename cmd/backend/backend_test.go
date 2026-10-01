@@ -1381,3 +1381,46 @@ func TestPromptKopiaSFTPSettings_KeyfileAuthDoesNotWarn(t *testing.T) {
 		t.Fatalf("expected no password-auth warning with keyfile auth, got %q", output)
 	}
 }
+
+func TestPromptEncryptedSecret_DoesNotEchoSecretOnTerminal(t *testing.T) {
+	service := newTestServiceWithSecretKey(t, "hunter2\r")
+	service.prompt.Terminal = fakeTerminal{}
+
+	var encrypted string
+	output := captureStdout(t, func() {
+		var err error
+		encrypted, err = service.promptEncryptedSecret("Kopia repository password", "")
+		if err != nil {
+			t.Fatalf("promptEncryptedSecret returned error: %v", err)
+		}
+	})
+
+	if strings.Contains(output, "hunter2") {
+		t.Fatalf("expected the secret not to be echoed, got output %q", output)
+	}
+
+	decrypted, err := service.secrets.Decrypt(encrypted)
+	if err != nil {
+		t.Fatalf("failed to decrypt: %v", err)
+	}
+	if decrypted != "hunter2" {
+		t.Fatalf("expected decrypted secret %q, got %q", "hunter2", decrypted)
+	}
+}
+
+func TestPromptBorgSettings_DoesNotEchoPassphraseOnTerminal(t *testing.T) {
+	// bin -> (empty), global_repo_name -> (default), encryption -> enter
+	// (keeps repokey), passphrase -> hunter2 + enter, compression -> (empty)
+	service := newTestServiceWithSecretKey(t, "\n\n\rhunter2\r\n")
+	service.prompt.Terminal = fakeTerminal{}
+
+	output := captureStdout(t, func() {
+		if _, err := service.promptBorgSettings(borg.DefaultConfig()); err != nil {
+			t.Fatalf("promptBorgSettings returned error: %v", err)
+		}
+	})
+
+	if strings.Contains(output, "hunter2") {
+		t.Fatalf("expected the passphrase not to be echoed, got output %q", output)
+	}
+}

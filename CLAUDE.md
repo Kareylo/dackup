@@ -125,7 +125,7 @@ Do not create import cycles, and avoid subcommand packages importing `cmd` direc
 | `paths.go` | `PathResolver` — resolves a configured path under a source/destination root; `CleanConfiguredPath` strips the leading separator |
 | `preflight.go` | `PreflightChecks` — validates config fields, source/dest dirs, `docker`/`rsync` on `PATH`, and that every configured path exists |
 | `prompts.go` | `PromptService` — interactive prompt helpers (`RequiredString`, `Bool`, `StringList`, ...) used by `cmd/config` |
-| `selection.go` | `PromptService.SelectOne`/`SelectMany` — checkbox choice lists (raw mode via `Terminal`, set from `StdinTerminal()` in `cmd/config`/`cmd/backend`'s `NewCommand`); falls back to typed numbers/names when not a TTY. Use these for any prompt with a fixed set of choices |
+| `selection.go` | `PromptService.SelectOne`/`SelectMany` — checkbox choice lists (raw mode via `Terminal`, set from `StdinTerminal()` in `cmd/config`/`cmd/backend`'s `NewCommand`); falls back to typed numbers/names when not a TTY. Use these for any prompt with a fixed set of choices. `PromptService.Secret` reads a secret in raw mode without echo (plain line read when not a TTY); use it for any password/key prompt |
 | `transfer.go` | `TransferService` — the staging copy (`rsync -a --delete`) in either direction, plus `FixBackupOwnership`/`FixRestoreOwnership` (`chown -R`) |
 
 ### Key domain concepts

@@ -69,7 +69,7 @@ func (service commandService) promptEncryptedSecret(label string, current string
 		promptLabel = label + " (leave empty to keep the current one)"
 	}
 
-	value, err := service.prompt.String(promptLabel)
+	value, err := service.prompt.Secret(promptLabel)
 	if err != nil {
 		return "", err
 	}
