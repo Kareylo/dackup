@@ -358,3 +358,47 @@ func TestLoggedCommandRunner_RunInDirWithEnv_VerboseRedactsSecretFlags(t *testin
 		t.Fatalf("expected redacted flag in verbose output, got %q", output)
 	}
 }
+
+func TestLoggedCommandRunner_Run_CreatesLogFileReadableByOwnerOnly(t *testing.T) {
+	logFile := filepath.Join(t.TempDir(), "run.log")
+	runner := LoggedCommandRunner{LogFile: logFile}
+
+	if err := runner.Run("sh", "-c", "echo out"); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	assertFileMode(t, logFile, 0o600)
+}
+
+func TestLoggedCommandRunner_RunInDirWithEnv_CreatesLogFileReadableByOwnerOnly(t *testing.T) {
+	logFile := filepath.Join(t.TempDir(), "run.log")
+	runner := LoggedCommandRunner{LogFile: logFile}
+
+	if err := runner.RunInDirWithEnv("", nil, "sh", "-c", "echo out"); err != nil {
+		t.Fatalf("RunInDirWithEnv returned error: %v", err)
+	}
+
+	assertFileMode(t, logFile, 0o600)
+}
+
+func TestLoggedCommandRunner_Run_TightensExistingWorldReadableLogFile(t *testing.T) {
+	logFile := writeWorldReadableLogFile(t)
+	runner := LoggedCommandRunner{LogFile: logFile}
+
+	if err := runner.Run("sh", "-c", "echo out"); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	assertFileMode(t, logFile, 0o600)
+}
+
+func TestLoggedCommandRunner_RunInDirWithEnv_TightensExistingWorldReadableLogFile(t *testing.T) {
+	logFile := writeWorldReadableLogFile(t)
+	runner := LoggedCommandRunner{LogFile: logFile}
+
+	if err := runner.RunInDirWithEnv("", nil, "sh", "-c", "echo out"); err != nil {
+		t.Fatalf("RunInDirWithEnv returned error: %v", err)
+	}
+
+	assertFileMode(t, logFile, 0o600)
+}
