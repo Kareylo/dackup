@@ -7,7 +7,7 @@
 # storage_account/encrypted_storage_key encode — and addresses test_azurite
 # via its "azurite" network alias rather than the service name itself,
 # which has an underscore and isn't a valid DNS hostname per RFC 1123 (see
-# scripts/init-minio.sh's comment — the same class of failure showed up
+# scripts/init-s3.sh's comment — the same class of failure showed up
 # there first). Retries until test_azurite is actually accepting
 # connections, bounded so a real, persistent failure exits with a clear
 # error instead of hanging forever — "az" itself is slow to start per

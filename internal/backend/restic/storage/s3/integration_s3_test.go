@@ -15,7 +15,7 @@ import (
 	"testing"
 )
 
-// TestIntegration_S3 backs up to and restores from the test_minio service
+// TestIntegration_S3 backs up to and restores from the test_s3 service
 // in test/compose.yml (the same container kopia's own s3 integration test
 // uses), using test/config.restic-s3.json.
 func TestIntegration_S3(t *testing.T) {

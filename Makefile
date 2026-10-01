@@ -117,7 +117,7 @@ test-integration: deps
 	@echo "Starting test/compose.yml storage emulator containers..."
 	docker compose -f test/compose.yml up -d
 	@echo "Waiting for bucket/container setup to finish..."
-	@for svc in test_minio_init test_azurite_init test_gcs_init; do \
+	@for svc in test_s3_init test_azurite_init test_gcs_init; do \
 		code=$$(docker wait $$svc); \
 		if [ "$$code" != "0" ]; then \
 			echo "$$svc failed (exit $$code); see: docker logs $$svc" >&2; \
@@ -136,7 +136,7 @@ test-integration-docker:
 	@echo "Starting test/compose.yml storage emulator containers..."
 	docker compose -f test/compose.yml up -d
 	@echo "Waiting for bucket/container setup to finish..."
-	@for svc in test_minio_init test_azurite_init test_gcs_init; do \
+	@for svc in test_s3_init test_azurite_init test_gcs_init; do \
 		code=$$(docker wait $$svc); \
 		if [ "$$code" != "0" ]; then \
 			echo "$$svc failed (exit $$code); see: docker logs $$svc" >&2; \
