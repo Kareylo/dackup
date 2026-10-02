@@ -2,11 +2,30 @@ package shared
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
+// ownerNamePattern accepts a user or group name, or a numeric ID, that chown
+// can only read as an operand: it never starts with '-' or '.', and holds no
+// ':', '/', '=' or whitespace. A trailing '$' is allowed for machine
+// accounts.
+var ownerNamePattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]*\$?$`)
+
+// ValidateOwnerName rejects a user or group name that chown could parse as
+// an option or that would change the owner:group operand. field names the
+// config field in the error.
+func ValidateOwnerName(field string, name string) error {
+	if !ownerNamePattern.MatchString(name) {
+		return fmt.Errorf("config field %q has invalid value %q: only [A-Za-z0-9_][A-Za-z0-9_.-]* (optionally ending in $) is allowed", field, name)
+	}
+
+	return nil
+}
+
 // PreflightChecks validates that action (backup or restore) can proceed:
-// the effective config file exists, config.User/Group are set, the source/
+// the effective config file exists, config.User/Group are set and valid
+// (see ValidateOwnerName), the source/
 // destination/backend roots exist as directories, docker and rsync are on
 // PATH, every container name and contains entry in configs is a valid
 // Docker name (see ValidateContainerName), and every configured path in
@@ -43,6 +62,14 @@ func PreflightChecks(
 
 	if strings.TrimSpace(config.Group) == "" {
 		return fmt.Errorf("config field %q is required", "group")
+	}
+
+	if err := ValidateOwnerName("user", config.User); err != nil {
+		return err
+	}
+
+	if err := ValidateOwnerName("group", config.Group); err != nil {
+		return err
 	}
 
 	srcInfo, err := fs.Stat(sourceRoot)

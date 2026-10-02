@@ -93,7 +93,7 @@ func (service TransferService) SinglePath(container string, srcPath string, dstP
 
 	if service.Options != nil && service.Options.DryRun {
 		logger.Log("INFO", fmt.Sprintf("[dry-run] Would create destination directory %s", dstPath))
-		logger.Log("INFO", fmt.Sprintf("[dry-run] Would run rsync -a --delete %s/ %s/", srcPath, dstPath))
+		logger.Log("INFO", fmt.Sprintf("[dry-run] Would run rsync -a --delete -- %s/ %s/", srcPath, dstPath))
 		return nil
 	}
 
@@ -104,7 +104,7 @@ func (service TransferService) SinglePath(container string, srcPath string, dstP
 	src := filepath.Clean(srcPath) + string(os.PathSeparator)
 	dst := filepath.Clean(dstPath) + string(os.PathSeparator)
 
-	if err := runner.Run("rsync", "-a", "--delete", src, dst); err != nil {
+	if err := runner.Run("rsync", "-a", "--delete", "--", src, dst); err != nil {
 		return fmt.Errorf("%s rsync failed for %s; see %s for details: %w", actionName, srcPath, service.LogFile, err)
 	}
 
@@ -120,11 +120,11 @@ func (service TransferService) FixBackupOwnership(owner string, group string) er
 	logger.Log("INFO", fmt.Sprintf("Setting ownership of %s to %s:%s ...", service.DestDir, owner, group))
 
 	if service.Options != nil && service.Options.DryRun {
-		logger.Log("INFO", fmt.Sprintf("[dry-run] Would run chown -R %s:%s %s", owner, group, service.DestDir))
+		logger.Log("INFO", fmt.Sprintf("[dry-run] Would run chown -R -- %s:%s %s", owner, group, service.DestDir))
 		return nil
 	}
 
-	if err := runner.Run("chown", "-R", fmt.Sprintf("%s:%s", owner, group), service.DestDir); err != nil {
+	if err := runner.Run("chown", "-R", "--", fmt.Sprintf("%s:%s", owner, group), service.DestDir); err != nil {
 		return fmt.Errorf("chown failed; see %s for details: %w", service.LogFile, err)
 	}
 
@@ -153,12 +153,12 @@ func (service TransferService) FixRestoreOwnership(configs []ContainerConfig, ow
 			dstPath := paths.DestinationPath(cleanPath)
 
 			if service.Options != nil && service.Options.DryRun {
-				logger.Log("INFO", fmt.Sprintf("[dry-run] Would run chown -R %s:%s %s", owner, group, dstPath))
+				logger.Log("INFO", fmt.Sprintf("[dry-run] Would run chown -R -- %s:%s %s", owner, group, dstPath))
 				changedPaths[cleanPath] = true
 				continue
 			}
 
-			if err := runner.Run("chown", "-R", fmt.Sprintf("%s:%s", owner, group), dstPath); err != nil {
+			if err := runner.Run("chown", "-R", "--", fmt.Sprintf("%s:%s", owner, group), dstPath); err != nil {
 				return fmt.Errorf("chown failed for %s; see %s for details: %w", dstPath, service.LogFile, err)
 			}
 
