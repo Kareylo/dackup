@@ -60,6 +60,24 @@ func (s Storage) Validate() error {
 		return fmt.Errorf("restic sftp storage requires path")
 	}
 
+	// These values end up in the ssh command line, and restic re-splits
+	// sftp.command into words, so whitespace, quotes, a backslash, or a
+	// leading '-' could break the command or inject extra ssh options.
+	fields := []struct {
+		name  string
+		value string
+	}{
+		{"host", s.Host},
+		{"username", s.Username},
+		{"keyfile_path", s.KeyfilePath},
+		{"known_hosts_path", s.KnownHostsPath},
+	}
+	for _, field := range fields {
+		if strings.ContainsAny(field.value, " \t\n\r\"'\\") || strings.HasPrefix(field.value, "-") {
+			return fmt.Errorf("restic sftp %s must not contain whitespace, quotes or backslashes, or start with '-'", field.name)
+		}
+	}
+
 	return nil
 }
 

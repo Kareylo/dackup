@@ -91,3 +91,52 @@ func TestStorage_BuildInvocation_KnownHostsSetsSFTPCommand(t *testing.T) {
 		t.Fatalf("expected an sftp.command override with UserKnownHostsFile, got %v", invocation.Args)
 	}
 }
+
+func TestStorage_Validate_RejectsValuesThatWouldSplitOrInjectSSHArguments(t *testing.T) {
+	cases := map[string]Storage{
+		"host with space":             {Host: "backup.example.com -oProxyCommand=x", Username: "dackup", Path: "/srv"},
+		"host starting with dash":     {Host: "-oProxyCommand=x", Username: "dackup", Path: "/srv"},
+		"username with tab":           {Host: "backup.example.com", Username: "dack\tup", Path: "/srv"},
+		"username starting with dash": {Host: "backup.example.com", Username: "-oProxyCommand=x", Path: "/srv"},
+		"keyfile with space":          {Host: "backup.example.com", Username: "dackup", Path: "/srv", KeyfilePath: "/a b"},
+		"keyfile with newline":        {Host: "backup.example.com", Username: "dackup", Path: "/srv", KeyfilePath: "/a\nb"},
+		"keyfile starting with dash":  {Host: "backup.example.com", Username: "dackup", Path: "/srv", KeyfilePath: "-oProxyCommand=x"},
+		"keyfile with quote":          {Host: "backup.example.com", Username: "dackup", Path: "/srv", KeyfilePath: `/a"b`},
+		"known_hosts with space":      {Host: "backup.example.com", Username: "dackup", Path: "/srv", KnownHostsPath: "/a b"},
+		"known_hosts with backslash":  {Host: "backup.example.com", Username: "dackup", Path: "/srv", KnownHostsPath: `/a\b`},
+	}
+
+	for name, s := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := s.Validate(); err == nil {
+				t.Fatalf("expected an error for %+v", s)
+			}
+		})
+	}
+}
+
+func TestStorage_Validate_ErrorNamesTheOffendingField(t *testing.T) {
+	s := Storage{Host: "backup.example.com", Username: "dackup", Path: "/srv", KeyfilePath: "/a b"}
+
+	err := s.Validate()
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "keyfile_path") {
+		t.Fatalf("expected the error to name keyfile_path, got %v", err)
+	}
+}
+
+func TestStorage_Validate_AcceptsOrdinaryKeyfileAndKnownHostsPaths(t *testing.T) {
+	s := Storage{
+		Host:           "backup.example.com",
+		Username:       "dackup",
+		Path:           "/srv/backups",
+		KeyfilePath:    "/home/dackup/.ssh/id_ed25519",
+		KnownHostsPath: "/home/dackup/.ssh/known_hosts",
+	}
+
+	if err := s.Validate(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
