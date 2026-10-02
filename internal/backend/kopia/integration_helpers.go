@@ -42,8 +42,23 @@ func IntegrationConfigPath(name string) string {
 // real ~/.config/dackup/secret.key — so the fixtures decrypt identically
 // on any machine that clones the repo, not just the one that generated
 // them.
-func integrationSecretStore() shared.SecretStore {
-	return shared.AESFileSecretStore{KeyPath: IntegrationConfigPath("secret.key")}
+//
+// Git checks the fixture out as 0644, which AESFileSecretStore refuses, so
+// it is copied to an owner-only file under t.TempDir() first.
+func integrationSecretStore(t *testing.T) shared.SecretStore {
+	t.Helper()
+
+	data, err := os.ReadFile(IntegrationConfigPath("secret.key"))
+	if err != nil {
+		t.Fatalf("failed to read test/secret.key: %v", err)
+	}
+
+	keyPath := filepath.Join(t.TempDir(), "secret.key")
+	if err := os.WriteFile(keyPath, data, 0o600); err != nil {
+		t.Fatalf("failed to copy test/secret.key: %v", err)
+	}
+
+	return shared.AESFileSecretStore{KeyPath: keyPath}
 }
 
 // testLogger routes Backend's log messages through t.Logf, so verbose
@@ -208,7 +223,7 @@ func NewIntegrationBackend(t *testing.T, config Config) Backend {
 		Runner:    capturingCommandRunner{t: t},
 		Logger:    testLogger{t: t},
 		Options:   &shared.Options{},
-		Secrets:   integrationSecretStore(),
+		Secrets:   integrationSecretStore(t),
 		FS:        shared.OSFileSystem{},
 	}
 }

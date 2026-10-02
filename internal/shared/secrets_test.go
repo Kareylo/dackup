@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -308,5 +309,121 @@ func TestAESFileSecretStore_LoadOrCreateKey_CreateKeyWriteError(t *testing.T) {
 
 	if _, err := store.Encrypt("value"); err == nil {
 		t.Fatal("expected an error when writing the new key file fails")
+	}
+}
+
+func TestAESFileSecretStore_ConcurrentEncryptOnFreshKeyPathSharesOneKey(t *testing.T) {
+	keyPath := filepath.Join(t.TempDir(), "secret.key")
+
+	const workers = 16
+	ciphertexts := make([]string, workers)
+	errs := make([]error, workers)
+
+	var wg sync.WaitGroup
+	for i := range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ciphertexts[i], errs[i] = AESFileSecretStore{KeyPath: keyPath}.Encrypt(fmt.Sprintf("value-%d", i))
+		}()
+	}
+	wg.Wait()
+
+	final := AESFileSecretStore{KeyPath: keyPath}
+	for i := range workers {
+		if errs[i] != nil {
+			t.Fatalf("worker %d: Encrypt returned error: %v", i, errs[i])
+		}
+
+		plaintext, err := final.Decrypt(ciphertexts[i])
+		if err != nil {
+			t.Fatalf("worker %d: ciphertext does not decrypt with the final key file: %v", i, err)
+		}
+
+		if want := fmt.Sprintf("value-%d", i); plaintext != want {
+			t.Fatalf("worker %d: expected %q, got %q", i, want, plaintext)
+		}
+	}
+}
+
+func TestAESFileSecretStore_NeverOverwritesAnExistingKeyFile(t *testing.T) {
+	keyPath := filepath.Join(t.TempDir(), "secret.key")
+
+	ciphertext, err := AESFileSecretStore{KeyPath: keyPath}.Encrypt("value")
+	if err != nil {
+		t.Fatalf("Encrypt returned error: %v", err)
+	}
+
+	original, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatalf("failed to read key file: %v", err)
+	}
+
+	// statErr makes the key look absent, the same as a second process that
+	// checked for the key just before the first one created it.
+	racing := AESFileSecretStore{
+		KeyPath: keyPath,
+		FS:      fakeSecretFileSystem{statErr: os.ErrNotExist},
+	}
+	if _, err := racing.Encrypt("other"); err != nil {
+		t.Fatalf("Encrypt returned error: %v", err)
+	}
+
+	current, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatalf("failed to read key file: %v", err)
+	}
+
+	if string(current) != string(original) {
+		t.Fatal("expected the existing key file to be left unchanged")
+	}
+
+	if _, err := (AESFileSecretStore{KeyPath: keyPath}).Decrypt(ciphertext); err != nil {
+		t.Fatalf("expected the original ciphertext to still decrypt: %v", err)
+	}
+}
+
+func TestAESFileSecretStore_CreateKeyLeavesOnlyTheKeyFile(t *testing.T) {
+	dir := t.TempDir()
+
+	if _, err := (AESFileSecretStore{KeyPath: filepath.Join(dir, "secret.key")}).Encrypt("value"); err != nil {
+		t.Fatalf("Encrypt returned error: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("failed to read key directory: %v", err)
+	}
+
+	if len(entries) != 1 || entries[0].Name() != "secret.key" {
+		names := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			names = append(names, entry.Name())
+		}
+		t.Fatalf("expected only secret.key in the key directory, got %v", names)
+	}
+}
+
+func TestAESFileSecretStore_RejectsKeyFileAccessibleByOthers(t *testing.T) {
+	for _, mode := range []os.FileMode{0o644, 0o640, 0o604} {
+		t.Run(fmt.Sprintf("%o", mode), func(t *testing.T) {
+			keyPath := filepath.Join(t.TempDir(), "secret.key")
+			if _, err := (AESFileSecretStore{KeyPath: keyPath}).Encrypt("value"); err != nil {
+				t.Fatalf("Encrypt returned error: %v", err)
+			}
+
+			if err := os.Chmod(keyPath, mode); err != nil {
+				t.Fatalf("failed to chmod key file: %v", err)
+			}
+
+			_, err := AESFileSecretStore{KeyPath: keyPath}.Encrypt("value")
+			if err == nil {
+				t.Fatalf("expected an error for a key file with mode %o", mode)
+			}
+
+			if !strings.Contains(err.Error(), "chmod 600") {
+				t.Fatalf("expected the error to tell the user to run chmod 600, got: %v", err)
+			}
+		})
 	}
 }
