@@ -5,6 +5,8 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -142,6 +144,15 @@ func (store AESFileSecretStore) readKey(fs FileSystem, keyPath string) ([]byte, 
 	}
 	defer file.Close()
 
+	info, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat secret key file %s: %w", keyPath, err)
+	}
+
+	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+		return nil, fmt.Errorf("secret key file %s has permissions %o and is accessible by other users; run chmod 600 %s", keyPath, perm, keyPath)
+	}
+
 	data, err := io.ReadAll(file)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read secret key file %s: %w", keyPath, err)
@@ -165,14 +176,35 @@ func (store AESFileSecretStore) createKey(fs FileSystem, keyPath string) ([]byte
 		return nil, fmt.Errorf("failed to generate secret key: %w", err)
 	}
 
-	file, err := fs.OpenFile(keyPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	suffix := make([]byte, 8)
+	if _, err := io.ReadFull(rand.Reader, suffix); err != nil {
+		return nil, fmt.Errorf("failed to generate secret key file name: %w", err)
+	}
+
+	// The key is written to a temporary file first and only then linked to
+	// keyPath, so another process never sees an empty or partial key, and an
+	// existing key is never replaced: Link fails if keyPath already exists.
+	tmpPath := keyPath + ".tmp-" + hex.EncodeToString(suffix)
+	file, err := fs.OpenFile(tmpPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create secret key file %s: %w", keyPath, err)
 	}
+	defer os.Remove(tmpPath)
 	defer file.Close()
 
 	if _, err := file.WriteString(base64.StdEncoding.EncodeToString(key)); err != nil {
 		return nil, fmt.Errorf("failed to write secret key file %s: %w", keyPath, err)
+	}
+
+	if err := file.Close(); err != nil {
+		return nil, fmt.Errorf("failed to write secret key file %s: %w", keyPath, err)
+	}
+
+	if err := os.Link(tmpPath, keyPath); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return store.readKey(fs, keyPath)
+		}
+		return nil, fmt.Errorf("failed to create secret key file %s: %w", keyPath, err)
 	}
 
 	return key, nil

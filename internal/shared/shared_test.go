@@ -433,3 +433,20 @@ func TestEffectiveContainersConfigPath_ConfigFilePointerReturnsPointerPath(t *te
 		t.Fatalf("expected %q, got %q", containersPath, got)
 	}
 }
+
+func TestWriteDackupConfig_CreatesConfigDirectoryOwnerOnly(t *testing.T) {
+	configDir := filepath.Join(t.TempDir(), "dackup")
+
+	if err := WriteDackupConfig(filepath.Join(configDir, "config.json"), DackupConfig{User: "user"}, nil); err != nil {
+		t.Fatalf("WriteDackupConfig returned error: %v", err)
+	}
+
+	info, err := os.Stat(configDir)
+	if err != nil {
+		t.Fatalf("expected the config directory to exist: %v", err)
+	}
+
+	if perm := info.Mode().Perm(); perm != 0o700 {
+		t.Fatalf("expected config directory permissions 0700, got %o", perm)
+	}
+}
