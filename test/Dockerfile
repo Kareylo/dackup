@@ -9,7 +9,7 @@
 # `make test-integration` does — through their published localhost ports —
 # without touching any of the integration tests' hardcoded
 # "localhost:<port>" config.
-FROM golang:1.26.2-bookworm
+FROM golang:1.26.8-bookworm
 
 # kopia isn't packaged in Debian's apt repos, and unlike borg its exact
 # version matters more here (behavior can vary enough across releases to
@@ -18,6 +18,9 @@ FROM golang:1.26.2-bookworm
 # `kopia --version` check that motivated this Dockerfile in the first
 # place: a locally installed kopia with no reproducible version at all.
 ARG KOPIA_VERSION=0.23.1
+# SHA-256 of kopia_${KOPIA_VERSION}_linux_amd64.deb, from that release's
+# checksums.txt. Update it together with KOPIA_VERSION.
+ARG KOPIA_SHA256=3998c96b2db3410880ec8f6723f3c127248915896c22e6b882b352693230253a
 
 # restic is pinned the same way and for the same reason as kopia above.
 # Debian bookworm does package a restic, but at a version this repo doesn't
@@ -27,6 +30,9 @@ ARG KOPIA_VERSION=0.23.1
 # restic/restic GitHub releases API, whose linux/amd64 asset is named
 # "restic_<version>_linux_amd64.bz2".
 ARG RESTIC_VERSION=0.19.1
+# SHA-256 of restic_${RESTIC_VERSION}_linux_amd64.bz2, from that release's
+# SHA256SUMS. Update it together with RESTIC_VERSION.
+ARG RESTIC_SHA256=f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c
 
 # borgbackup is left unpinned, tracking whatever version Debian bookworm's
 # own apt snapshot carries — consistent with the Makefile's own
@@ -41,10 +47,12 @@ RUN apt-get update \
          ca-certificates \
     && curl -fsSLo /tmp/kopia.deb \
          "https://github.com/kopia/kopia/releases/download/v${KOPIA_VERSION}/kopia_${KOPIA_VERSION}_linux_amd64.deb" \
+    && echo "${KOPIA_SHA256}  /tmp/kopia.deb" | sha256sum -c - \
     && apt-get install -y --no-install-recommends /tmp/kopia.deb \
     && rm -f /tmp/kopia.deb \
     && curl -fsSLo /tmp/restic.bz2 \
          "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_linux_amd64.bz2" \
+    && echo "${RESTIC_SHA256}  /tmp/restic.bz2" | sha256sum -c - \
     && bunzip2 /tmp/restic.bz2 \
     && install -m 0755 /tmp/restic /usr/local/bin/restic \
     && rm -f /tmp/restic \
