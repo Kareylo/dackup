@@ -290,3 +290,48 @@ func TestPreflightChecks_InvalidContainsEntryReturnsError(t *testing.T) {
 		t.Fatalf("expected error to name the invalid contains entry, got %v", err)
 	}
 }
+
+func TestValidateOwnerName(t *testing.T) {
+	for _, name := range []string{"user", "www-data", "_apt", "john.doe", "Admin", "1000", "machine$"} {
+		if err := ValidateOwnerName("user", name); err != nil {
+			t.Errorf("expected %q to be accepted, got %v", name, err)
+		}
+	}
+
+	for _, name := range []string{"", "--reference=/root/x", "-R", "user:group", "a b", "a/b", ".hidden", "a$b"} {
+		err := ValidateOwnerName("group", name)
+		if err == nil {
+			t.Errorf("expected %q to be rejected", name)
+			continue
+		}
+		if !strings.Contains(err.Error(), "group") {
+			t.Errorf("expected the error for %q to name the field, got %v", name, err)
+		}
+	}
+}
+
+func TestPreflightChecks_UserStartingWithDashReturnsError(t *testing.T) {
+	fixture := newPreflightFixture(t)
+	fixture.config.User = "--reference=/root/x"
+
+	err := fixture.run()
+	if err == nil {
+		t.Fatal("expected an error for a user that would be parsed as a chown option")
+	}
+	if !strings.Contains(err.Error(), "user") {
+		t.Fatalf("expected the error to name the user field, got %v", err)
+	}
+}
+
+func TestPreflightChecks_GroupWithColonReturnsError(t *testing.T) {
+	fixture := newPreflightFixture(t)
+	fixture.config.Group = "group:other"
+
+	err := fixture.run()
+	if err == nil {
+		t.Fatal("expected an error for a group containing a colon")
+	}
+	if !strings.Contains(err.Error(), "group") {
+		t.Fatalf("expected the error to name the group field, got %v", err)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -423,5 +424,66 @@ func TestTransferService_DirectionWording_Backup(t *testing.T) {
 
 	if got := service.titleAction(); got != "Backup" {
 		t.Fatalf("expected titleAction %q, got %q", "Backup", got)
+	}
+}
+
+func TestTransferService_SinglePath_SeparatesOptionsFromOperands(t *testing.T) {
+	runner := &fakeTransferRunner{}
+	service := TransferService{
+		Direction: TransferBackup,
+		FS:        fakeTransferFS{},
+		Runner:    runner,
+		Logger:    &fakeTransferLogger{},
+	}
+
+	srcPath := t.TempDir()
+	dstPath := filepath.Join(t.TempDir(), "dst")
+
+	if err := service.SinglePath("app", srcPath, dstPath); err != nil {
+		t.Fatalf("SinglePath returned error: %v", err)
+	}
+
+	want := [][]string{{"rsync", "-a", "--delete", "--", srcPath + "/", dstPath + "/"}}
+	if !reflect.DeepEqual(runner.ranCommands, want) {
+		t.Fatalf("expected %#v, got %#v", want, runner.ranCommands)
+	}
+}
+
+func TestTransferService_FixBackupOwnership_SeparatesOptionsFromOperands(t *testing.T) {
+	runner := &fakeTransferRunner{}
+	service := TransferService{
+		DestDir: "/data",
+		Runner:  runner,
+		Logger:  &fakeTransferLogger{},
+	}
+
+	if err := service.FixBackupOwnership("user", "group"); err != nil {
+		t.Fatalf("FixBackupOwnership returned error: %v", err)
+	}
+
+	want := [][]string{{"chown", "-R", "--", "user:group", "/data"}}
+	if !reflect.DeepEqual(runner.ranCommands, want) {
+		t.Fatalf("expected %#v, got %#v", want, runner.ranCommands)
+	}
+}
+
+func TestTransferService_FixRestoreOwnership_SeparatesOptionsFromOperands(t *testing.T) {
+	runner := &fakeTransferRunner{}
+	service := TransferService{
+		DestDir: "/data",
+		Runner:  runner,
+		Logger:  &fakeTransferLogger{},
+		Paths:   PathResolver{SourceRoot: "/src", DestinationRoot: "/data"},
+	}
+
+	configs := []ContainerConfig{{Container: "app", Paths: []string{"/app"}}}
+
+	if err := service.FixRestoreOwnership(configs, "user", "group"); err != nil {
+		t.Fatalf("FixRestoreOwnership returned error: %v", err)
+	}
+
+	want := [][]string{{"chown", "-R", "--", "user:group", "/data/app"}}
+	if !reflect.DeepEqual(runner.ranCommands, want) {
+		t.Fatalf("expected %#v, got %#v", want, runner.ranCommands)
 	}
 }
