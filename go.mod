@@ -2,7 +2,7 @@ module dackup
 
 go 1.26.2
 
-toolchain go1.26.8
+toolchain go1.26.9
 
 require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
