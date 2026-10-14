@@ -68,7 +68,7 @@ Build the binary:
 make build
 ```
 
-Install it to `/usr/local/sbin/dackup`:
+Install it to `/usr/local/bin/dackup`:
 
 ```bash
 make install
