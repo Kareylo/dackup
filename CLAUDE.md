@@ -87,7 +87,7 @@ go build -o build/dackup .   # build locally
 make build                    # build via Makefile (runs `deps` first, strips symbols)
 make test                     # go test ./... (runs `deps` first)
 go fmt ./...                  # required after any refactor, per AGENTS.md
-make install / make uninstall # install/remove binary at /usr/local/sbin/dackup (uses sudo if not root)
+make install / make uninstall # install/remove binary at /usr/local/bin/dackup (uses sudo if not root)
 ```
 
 There is no separate lint target; `go vet ./...` is the natural check if needed. Go 1.26.2+ is required (go.mod).

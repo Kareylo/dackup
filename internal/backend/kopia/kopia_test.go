@@ -145,7 +145,7 @@ const globalConfigPath = "/repos/.kopia-config/global.config"
 
 func connectArgsKey(kind string, extra ...string) string {
 	args := append([]string{"repository", "connect", kind}, extra...)
-	args = append(args, "--config-file="+globalConfigPath)
+	args = append(args, "--no-persist-credentials", "--config-file="+globalConfigPath)
 	return strings.Join(args, " ")
 }
 
@@ -293,7 +293,7 @@ func TestBackend_Backup_ConnectsToExistingRepoThenCreatesSnapshot(t *testing.T) 
 	}
 
 	connectCall := runner.calls[0]
-	wantConnectArgs := []string{"repository", "connect", "filesystem", "--path=/repos/global", "--config-file=" + globalConfigPath}
+	wantConnectArgs := []string{"repository", "connect", "filesystem", "--path=/repos/global", "--no-persist-credentials", "--config-file=" + globalConfigPath}
 	if !equalArgs(connectCall.args, wantConnectArgs) {
 		t.Fatalf("expected connect args %v, got %v", wantConnectArgs, connectCall.args)
 	}
@@ -356,7 +356,7 @@ func TestBackend_Backup_CreatesRepoWhenConnectFails(t *testing.T) {
 	}
 
 	createCall := runner.calls[1]
-	wantCreateArgs := []string{"repository", "create", "filesystem", "--path=/repos/global", "--config-file=" + globalConfigPath}
+	wantCreateArgs := []string{"repository", "create", "filesystem", "--path=/repos/global", "--no-persist-credentials", "--config-file=" + globalConfigPath}
 	if !equalArgs(createCall.args, wantCreateArgs) {
 		t.Fatalf("expected create args %v, got %v", wantCreateArgs, createCall.args)
 	}
@@ -493,6 +493,12 @@ func TestBackend_Restore_RestoresLatestSnapshot(t *testing.T) {
 
 	if len(runner.calls) != 3 {
 		t.Fatalf("expected 3 calls (connect, list, restore), got %d: %+v", len(runner.calls), runner.calls)
+	}
+
+	connectCall := runner.calls[0]
+	wantConnectArgs := []string{"repository", "connect", "filesystem", "--path=/repos/global", "--no-persist-credentials", "--config-file=" + globalConfigPath}
+	if !equalArgs(connectCall.args, wantConnectArgs) {
+		t.Fatalf("expected connect args %v, got %v", wantConnectArgs, connectCall.args)
 	}
 
 	restoreCall := runner.calls[2]

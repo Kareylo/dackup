@@ -213,7 +213,7 @@ func (backend Backend) connectArgs(repoName string, configPath string) ([]string
 	}
 
 	args := append([]string{"repository", "connect", invocation.Kind}, invocation.Args...)
-	args = append(args, "--config-file="+configPath)
+	args = append(args, "--no-persist-credentials", "--config-file="+configPath)
 
 	return args, invocation.Env, nil
 }
@@ -250,7 +250,7 @@ func (backend Backend) createArgs(repoName string, configPath string) ([]string,
 	}
 
 	args := append([]string{"repository", "create", invocation.Kind}, invocation.Args...)
-	args = append(args, "--config-file="+configPath)
+	args = append(args, "--no-persist-credentials", "--config-file="+configPath)
 
 	return args, invocation.Env, nil
 }
@@ -271,9 +271,11 @@ func (backend Backend) storageInvocation(repoName string) (storage.Invocation, e
 // already-connected repository needs: the repository password, plus
 // whatever repoName's storage type requires to reach the actual storage
 // (e.g. AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY for s3, STORAGE_EMULATOR_HOST
-// for gcs). kopia's local --config-file caches enough to reconnect to the
-// repository itself without re-supplying the repository password on every
-// call, but it does not persist storage-level env vars — the underlying
+// for gcs). connectArgs/createArgs pass --no-persist-credentials, so the
+// local --config-file never holds the repository password (kopia would
+// otherwise write it, only base64-encoded, to <config>.kopia-password next
+// to it) and every call must re-supply it. Storage-level env vars are not
+// persisted by kopia either — the underlying
 // client library (the AWS/Google SDKs, rclone) re-reads those from the
 // process environment on every invocation, not just the first
 // "repository connect/create" — so every kopia call touching a repository
