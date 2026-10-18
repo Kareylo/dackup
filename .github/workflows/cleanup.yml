@@ -1,0 +1,40 @@
+name: cleanup
+
+on:
+  pull_request:
+    types:
+      - closed
+  schedule:
+    - cron: "0 3 * * 0"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  caches:
+    name: Prune caches
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete caches outside releases, main and develop
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api --paginate "repos/${REPO}/actions/caches?per_page=100" \
+            --jq '.actions_caches[] | [.id, .ref, .last_accessed_at] | @tsv' > caches.tsv
+
+          # Delete every cache that is not on main, develop or a release tag.
+          awk -F'\t' '$2 != "refs/heads/main" && $2 != "refs/heads/develop" && $2 !~ /^refs\/tags\/v/ {print $1}' caches.tsv > delete.txt
+
+          # On main and develop keep only the most recently used cache per ref.
+          for ref in refs/heads/main refs/heads/develop; do
+            awk -F'\t' -v ref="$ref" '$2 == ref' caches.tsv | sort -t$'\t' -k3,3r | tail -n +2 | cut -f1 >> delete.txt
+          done
+
+          while read -r id; do
+            [ -n "$id" ] || continue
+            echo "Deleting cache ${id}"
+            gh api -X DELETE "repos/${REPO}/actions/caches/${id}"
+          done < delete.txt
