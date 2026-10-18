@@ -70,6 +70,7 @@ jobs:
           name: dackup-${{ matrix.goos }}-${{ matrix.goarch }}
           path: build/dackup-${{ matrix.goos }}-${{ matrix.goarch }}
           if-no-files-found: error
+          retention-days: 1
 
   release:
     name: Publish release
