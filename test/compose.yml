@@ -51,7 +51,7 @@ services:
   # storage types expect — see scripts/init-s3.sh. It's a one-shot
   # container (exits once the bucket exists), not a long-running service.
   test_s3_init:
-    image: amazon/aws-cli:2.37.7
+    image: amazon/aws-cli:2.39.7
     container_name: test_s3_init
     depends_on:
       - test_s3
