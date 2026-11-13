@@ -40,6 +40,11 @@ type Storage struct {
 	// RegionName selects a specific Swift region, sent via OS_REGION_NAME.
 	// Optional.
 	RegionName string `json:"region_name,omitempty"`
+
+	// AllowInsecureHTTP opts in to sending the password to a non-https
+	// AuthURL, where it travels in cleartext. Validate rejects that
+	// combination unless this is set.
+	AllowInsecureHTTP bool `json:"allow_insecure_http,omitempty"`
 }
 
 // Validate reports whether the Swift settings are well-formed.
@@ -60,7 +65,21 @@ func (s Storage) Validate() error {
 		return fmt.Errorf("restic swift storage requires encrypted_password")
 	}
 
+	if s.SendsCredentialsInCleartext() && !s.AllowInsecureHTTP {
+		return fmt.Errorf("restic swift storage would send the password in cleartext over %q; use https:// or set allow_insecure_http", s.AuthURL)
+	}
+
 	return nil
+}
+
+// SendsCredentialsInCleartext reports whether a username is configured for
+// an AuthURL that isn't https://, i.e. Keystone authentication would send
+// the password unencrypted.
+func (s Storage) SendsCredentialsInCleartext() bool {
+	if strings.TrimSpace(s.Username) == "" {
+		return false
+	}
+	return !strings.HasPrefix(strings.ToLower(strings.TrimSpace(s.AuthURL)), "https://")
 }
 
 // BuildInvocation implements storage.Provider.

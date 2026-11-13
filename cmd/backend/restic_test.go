@@ -6,6 +6,7 @@ import (
 	"dackup/internal/backend/restic/storage/rest"
 	"dackup/internal/backend/restic/storage/s3"
 	"dackup/internal/backend/restic/storage/sftp"
+	"dackup/internal/backend/restic/storage/swift"
 	"dackup/internal/shared"
 	"encoding/json"
 	"os"
@@ -419,6 +420,63 @@ func TestPromptResticSwiftSettings_GathersAllFields(t *testing.T) {
 	}
 	if decrypted != "hunter2" {
 		t.Fatalf("expected decrypted password %q, got %q", "hunter2", decrypted)
+	}
+}
+
+func TestPromptResticSwiftSettings_PlainHTTPAuthURLAsksForOptIn(t *testing.T) {
+	// container, auth url, username, password, allow insecure http -> y,
+	// tenant, region, prefix
+	input := "my-container\nhttp://keystone.example.com\ndackup\nhunter2\ny\nmyproject\nRegionOne\ndackup\n"
+	service := newTestServiceWithSecretKey(t, input)
+
+	got, err := service.promptResticSwiftSettings(nil)
+	if err != nil {
+		t.Fatalf("promptResticSwiftSettings returned error: %v", err)
+	}
+
+	if !got.AllowInsecureHTTP {
+		t.Fatalf("expected allow_insecure_http to be set after opting in, got %#v", got)
+	}
+	if got.TenantName != "myproject" || got.RegionName != "RegionOne" || got.Prefix != "dackup" {
+		t.Fatalf("expected the prompts after the opt-in to keep their order, got %#v", got)
+	}
+	if err := got.Validate(); err != nil {
+		t.Fatalf("expected the opted-in settings to validate, got: %v", err)
+	}
+}
+
+func TestPromptResticSwiftSettings_PlainHTTPAuthURLDefaultsToNoOptIn(t *testing.T) {
+	// container, auth url, username, password, allow insecure http ->
+	// (default: no), tenant, region, prefix
+	input := "my-container\nhttp://keystone.example.com\ndackup\nhunter2\n\n\n\n\n"
+	service := newTestServiceWithSecretKey(t, input)
+
+	got, err := service.promptResticSwiftSettings(nil)
+	if err != nil {
+		t.Fatalf("promptResticSwiftSettings returned error: %v", err)
+	}
+
+	if got.AllowInsecureHTTP {
+		t.Fatalf("expected allow_insecure_http to stay false by default, got %#v", got)
+	}
+	if err := got.Validate(); err == nil {
+		t.Fatal("expected the resulting settings to fail validation without the opt-in")
+	}
+}
+
+func TestPromptResticSwiftSettings_HTTPSClearsInsecureOptIn(t *testing.T) {
+	// https auth url: no opt-in question is asked.
+	input := "my-container\nhttps://keystone.example.com\ndackup\nhunter2\n\n\n\n"
+	service := newTestServiceWithSecretKey(t, input)
+
+	current := &swift.Storage{AuthURL: "http://keystone.example.com", AllowInsecureHTTP: true}
+	got, err := service.promptResticSwiftSettings(current)
+	if err != nil {
+		t.Fatalf("promptResticSwiftSettings returned error: %v", err)
+	}
+
+	if got.AllowInsecureHTTP {
+		t.Fatalf("expected allow_insecure_http to be cleared for an https auth url, got %#v", got)
 	}
 }
 

@@ -490,6 +490,16 @@ func (service commandService) promptResticSwiftSettings(current *swift.Storage) 
 	}
 	config.EncryptedPassword = encryptedPassword
 
+	if config.SendsCredentialsInCleartext() {
+		allowInsecureHTTP, err := service.prompt.Bool("The Swift auth URL is not https://, so the password would be sent in cleartext. Allow it anyway?", config.AllowInsecureHTTP)
+		if err != nil {
+			return swift.Storage{}, err
+		}
+		config.AllowInsecureHTTP = allowInsecureHTTP
+	} else {
+		config.AllowInsecureHTTP = false
+	}
+
 	tenantName, err := service.promptOptionalStringWithCurrent("Swift tenant/project name (leave empty if not required)", config.TenantName)
 	if err != nil {
 		return swift.Storage{}, err
