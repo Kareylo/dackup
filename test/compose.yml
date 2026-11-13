@@ -30,7 +30,7 @@ services:
   # test/config.s3.json and test/config.restic-s3.json already encode
   # (encrypted with test/secret.key).
   test_s3:
-    image: versity/versitygw:v1.8.0
+    image: versity/versitygw:v1.11.0
     container_name: test_s3
     # networks.default.aliases: "test_s3" (the service/container name) has
     # an underscore, which isn't a valid DNS hostname per RFC 1123 — Docker's
