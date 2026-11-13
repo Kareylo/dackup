@@ -86,6 +86,18 @@ Clean build artifacts:
 make clean
 ```
 
+### Prebuilt binaries
+
+Each tagged release publishes `dackup-<os>-<arch>` binaries for linux and darwin (amd64, arm64), a `SHA256SUMS` file, and a signed build provenance attestation for every binary.
+
+Check that a downloaded binary was built by this repository's release workflow (requires the [GitHub CLI](https://cli.github.com/)):
+
+```bash
+gh attestation verify dackup-linux-amd64 --repo Kareylo/dackup
+```
+
+`SHA256SUMS` only detects a corrupted download: it is published in the same release as the binaries, so it cannot prove where they came from. Use the attestation for that.
+
 ## Configuration
 
 The default configuration file is:
