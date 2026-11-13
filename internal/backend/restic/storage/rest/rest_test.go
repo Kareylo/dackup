@@ -1,6 +1,10 @@
 package rest
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 type fakeSecretStore struct{}
 
@@ -79,4 +83,75 @@ func containsEnv(env []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestStorage_SendsCredentialsInCleartext(t *testing.T) {
+	cases := []struct {
+		name    string
+		storage Storage
+		want    bool
+	}{
+		{"http with credentials", Storage{URL: "http://backup.example.com:8000", Username: "dackup"}, true},
+		{"uppercase HTTP with credentials", Storage{URL: "HTTP://backup.example.com:8000", Username: "dackup"}, true},
+		{"https with credentials", Storage{URL: "https://backup.example.com:8000", Username: "dackup"}, false},
+		{"uppercase HTTPS with credentials", Storage{URL: "HTTPS://backup.example.com:8000", Username: "dackup"}, false},
+		{"http without credentials", Storage{URL: "http://backup.example.com:8000"}, false},
+		{"no scheme with credentials", Storage{URL: "backup.example.com:8000", Username: "dackup"}, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.storage.SendsCredentialsInCleartext(); got != tc.want {
+				t.Fatalf("SendsCredentialsInCleartext() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStorage_Validate_RejectsCleartextCredentialsWithoutOptIn(t *testing.T) {
+	storage := Storage{URL: "http://backup.example.com:8000", Username: "dackup", EncryptedPassword: "enc:secret"}
+
+	err := storage.Validate()
+	if err == nil {
+		t.Fatal("expected an error for credentials over http:// without allow_insecure_http")
+	}
+
+	for _, want := range []string{"cleartext", "http://backup.example.com:8000", "allow_insecure_http"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected error to mention %q, got: %v", want, err)
+		}
+	}
+}
+
+func TestStorage_Validate_AcceptsCleartextCredentialsWithOptIn(t *testing.T) {
+	storage := Storage{URL: "http://localhost:8000", Username: "dackup", EncryptedPassword: "enc:secret", AllowInsecureHTTP: true}
+
+	if err := storage.Validate(); err != nil {
+		t.Fatalf("expected allow_insecure_http to permit http:// credentials, got: %v", err)
+	}
+}
+
+func TestStorage_Validate_AcceptsHTTPWithoutCredentials(t *testing.T) {
+	if err := (Storage{URL: "http://localhost:8010"}).Validate(); err != nil {
+		t.Fatalf("expected an unauthenticated http:// server to be accepted, got: %v", err)
+	}
+}
+
+func TestStorage_Validate_AcceptsHTTPSWithCredentials(t *testing.T) {
+	storage := Storage{URL: "https://backup.example.com:8000", Username: "dackup", EncryptedPassword: "enc:secret"}
+
+	if err := storage.Validate(); err != nil {
+		t.Fatalf("expected https:// with credentials to be accepted, got: %v", err)
+	}
+}
+
+func TestStorage_AllowInsecureHTTP_JSONFieldName(t *testing.T) {
+	var storage Storage
+	if err := json.Unmarshal([]byte(`{"url":"http://localhost:8000","allow_insecure_http":true}`), &storage); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if !storage.AllowInsecureHTTP {
+		t.Fatal("expected the allow_insecure_http JSON field to set AllowInsecureHTTP")
+	}
 }

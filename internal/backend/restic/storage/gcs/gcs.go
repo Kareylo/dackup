@@ -82,4 +82,4 @@ func (s Storage) BuildInvocation(repoName string, secrets shared.SecretStore) (s
 // like fake-gcs-server don't validate it — it only exists to make restic
 // skip its own google.DefaultTokenSource lookup (see EmulatorHost's doc
 // comment).
-const dummyEmulatorAccessToken = "dackup-gcs-emulator-dummy-token"
+const dummyEmulatorAccessToken = "dackup-gcs-emulator-dummy-token" // #nosec G101 -- placeholder for local emulators, not a real credential

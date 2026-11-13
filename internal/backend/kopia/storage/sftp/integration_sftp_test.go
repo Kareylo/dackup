@@ -22,7 +22,8 @@ import (
 // TestIntegration_SFTP backs up to and restores from the test_sftp service
 // in test/compose.yml, using test/config.sftp.json.
 //
-// The fixture leaves sftp.known_hosts_path empty because the container's
+// The fixture's sftp.known_hosts_path is only a placeholder (Validate
+// requires the field to be set) because the container's
 // host key is regenerated on every "docker compose up" (atmoz/sftp doesn't
 // persist it across restarts unless a volume is mounted for /etc/ssh) —
 // baking a specific key into the committed fixture would go stale the

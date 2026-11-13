@@ -17,7 +17,7 @@ import (
 const (
 	// DefaultSecretKeyRelativePath is DefaultSecretKeyPath's path, relative
 	// to the user's home directory.
-	DefaultSecretKeyRelativePath = ".config/dackup/secret.key"
+	DefaultSecretKeyRelativePath = ".config/dackup/secret.key" // #nosec G101 -- a file path, not a credential
 
 	secretEncodingPrefix = "v1:"
 	secretKeySize        = 32

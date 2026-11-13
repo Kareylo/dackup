@@ -77,6 +77,9 @@ func (runnerWithoutEnvSupport) LookPath(file string) (string, error)            
 type fakeFileSystem struct {
 	existing map[string]bool
 	mkdirs   []string
+	// mkdirPerms[i] is the perm passed with mkdirs[i].
+	mkdirPerms []os.FileMode
+	removed    []string
 }
 
 func newFakeFileSystem(existing ...string) *fakeFileSystem {
@@ -96,7 +99,14 @@ func (fs *fakeFileSystem) Stat(name string) (os.FileInfo, error) {
 
 func (fs *fakeFileSystem) MkdirAll(path string, perm os.FileMode) error {
 	fs.mkdirs = append(fs.mkdirs, path)
+	fs.mkdirPerms = append(fs.mkdirPerms, perm)
 	fs.existing[path] = true
+	return nil
+}
+
+func (fs *fakeFileSystem) RemoveAll(path string) error {
+	fs.removed = append(fs.removed, path)
+	delete(fs.existing, path)
 	return nil
 }
 
@@ -432,12 +442,55 @@ func TestBackend_Restore_DryRunMakesNoCalls(t *testing.T) {
 	}
 }
 
-func TestBackend_Restore_RepoNotReachableIsGracefulNoOp(t *testing.T) {
+// A failed "repository connect" during restore cannot be told apart from
+// an outage, a wrong password or expired credentials, so it must fail the
+// restore instead of being reported as "nothing to restore".
+func TestBackend_Restore_ConnectFailureReturnsError(t *testing.T) {
 	runner := &fakeEnvRunner{
 		runErrs: map[string]error{
-			connectArgsKey("filesystem", "--path=/repos/global"): fmt.Errorf("not a repository"),
+			connectArgsKey("filesystem", "--path=/repos/global"): fmt.Errorf("invalid repository password"),
 		},
 	}
+	logger := &fakeLogger{}
+	backend := testBackend(runner, newFakeFileSystem("/repos/global"), logger)
+
+	err := backend.Restore("/staging")
+	if err == nil {
+		t.Fatal("expected Restore to return an error when connect fails")
+	}
+
+	if !strings.Contains(err.Error(), `"global"`) || !strings.Contains(err.Error(), "invalid repository password") {
+		t.Fatalf("expected the error to name the repository and the cause, got %v", err)
+	}
+
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected only the failed connect attempt, got %+v", runner.calls)
+	}
+
+	if hasMessageContaining(logger.messages, "nothing to restore") {
+		t.Fatalf("expected no \"nothing to restore\" message, got %v", logger.messages)
+	}
+}
+
+// Remote storage has no local way to prove a repository was never
+// created, so any connect failure there is an error too.
+func TestBackend_Restore_RemoteConnectFailureReturnsError(t *testing.T) {
+	runner := &fakeEnvRunner{runErr: fmt.Errorf("dial tcp: connection refused")}
+	backend := testBackend(runner, newFakeFileSystem(), &fakeLogger{})
+	backend.Config.StorageType = s3.Name
+	backend.Config.S3 = &s3.Storage{Bucket: "my-bucket", AccessKeyID: "AKID", EncryptedSecretAccessKey: "enc:secret"}
+
+	if err := backend.Restore("/staging"); err == nil {
+		t.Fatal("expected Restore to return an error when connect to remote storage fails")
+	}
+}
+
+// With filesystem storage, a missing repository directory proves the
+// repository was never created, so restoring from it is still a graceful
+// no-op (the same as borg's uninitialized-repository case), without even
+// trying to connect.
+func TestBackend_Restore_FilesystemRepoNeverCreatedIsGracefulNoOp(t *testing.T) {
+	runner := &fakeEnvRunner{}
 	logger := &fakeLogger{}
 	backend := testBackend(runner, newFakeFileSystem(), logger)
 
@@ -445,12 +498,12 @@ func TestBackend_Restore_RepoNotReachableIsGracefulNoOp(t *testing.T) {
 		t.Fatalf("Restore returned error: %v", err)
 	}
 
-	if len(runner.calls) != 1 {
-		t.Fatalf("expected only the failed connect attempt, got %+v", runner.calls)
+	if len(runner.calls) != 0 {
+		t.Fatalf("expected no kopia calls for a repository directory that does not exist, got %+v", runner.calls)
 	}
 
 	if !hasMessageContaining(logger.messages, "does not exist yet") {
-		t.Fatalf("expected a log message about the unreachable repo, got %v", logger.messages)
+		t.Fatalf("expected a log message about the missing repository, got %v", logger.messages)
 	}
 }
 
@@ -461,7 +514,7 @@ func TestBackend_Restore_EmptySnapshotListIsGracefulNoOp(t *testing.T) {
 		},
 	}
 	logger := &fakeLogger{}
-	backend := testBackend(runner, newFakeFileSystem(), logger)
+	backend := testBackend(runner, newFakeFileSystem("/repos/global"), logger)
 
 	if err := backend.Restore("/staging"); err != nil {
 		t.Fatalf("Restore returned error: %v", err)
@@ -484,7 +537,7 @@ func TestBackend_Restore_RestoresLatestSnapshot(t *testing.T) {
 			"snapshot list /staging --json --config-file=" + globalConfigPath: []byte(`[{"id":"k1a"},{"id":"k2b"}]`),
 		},
 	}
-	fs := newFakeFileSystem()
+	fs := newFakeFileSystem("/repos/global")
 	backend := testBackend(runner, fs, &fakeLogger{})
 
 	if err := backend.Restore("/staging"); err != nil {
@@ -502,7 +555,9 @@ func TestBackend_Restore_RestoresLatestSnapshot(t *testing.T) {
 	}
 
 	restoreCall := runner.calls[2]
-	wantArgs := []string{"snapshot", "restore", "k2b", "/staging", "--config-file=" + globalConfigPath}
+	// --delete-extra: kopia restores one target per configured path, so it
+	// removes files the snapshot doesn't have from that target only.
+	wantArgs := []string{"snapshot", "restore", "k2b", "/staging", "--delete-extra", "--config-file=" + globalConfigPath}
 	if !equalArgs(restoreCall.args, wantArgs) {
 		t.Fatalf("expected restore args %v, got %v", wantArgs, restoreCall.args)
 	}
@@ -624,7 +679,7 @@ func TestBackend_RestoreGroups_RestoresFromEachGroupRepoOnly(t *testing.T) {
 			"snapshot list /staging/config/adguard --json --config-file=/repos/.kopia-config/adguard.config":   []byte(`[{"id":"a1"}]`),
 		},
 	}
-	fs := newFakeFileSystem()
+	fs := newFakeFileSystem("/repos/paperless", "/repos/adguard")
 	backend := testBackend(runner, fs, &fakeLogger{})
 
 	groups := []shared.BackendGroup{
@@ -704,4 +759,64 @@ func hasMessageContaining(messages []string, substr string) bool {
 		}
 	}
 	return false
+}
+
+// mkdirPerm returns the perm the last MkdirAll call for path used, and
+// whether there was one.
+func (fs *fakeFileSystem) mkdirPerm(path string) (os.FileMode, bool) {
+	for i := len(fs.mkdirs) - 1; i >= 0; i-- {
+		if fs.mkdirs[i] == path {
+			return fs.mkdirPerms[i], true
+		}
+	}
+
+	return 0, false
+}
+
+// assertMkdirPerm fails t unless path was created with want.
+func assertMkdirPerm(t *testing.T, fs *fakeFileSystem, path string, want os.FileMode) {
+	t.Helper()
+
+	got, ok := fs.mkdirPerm(path)
+	if !ok {
+		t.Fatalf("expected MkdirAll(%s), got calls for %v", path, fs.mkdirs)
+	}
+
+	if got != want {
+		t.Fatalf("expected %s to be created with mode %#o, got %#o", path, want, got)
+	}
+}
+
+// --- Staging directory permissions ---
+
+func TestBackend_Restore_CreatesRestoreTargetWithStagingDirMode(t *testing.T) {
+	runner := &fakeEnvRunner{
+		outputs: map[string][]byte{
+			"snapshot list /staging --json --config-file=" + globalConfigPath: []byte(`[{"id":"k1a"}]`),
+		},
+	}
+	fs := newFakeFileSystem("/repos/global")
+	backend := testBackend(runner, fs, &fakeLogger{})
+
+	if err := backend.Restore("/staging"); err != nil {
+		t.Fatalf("Restore returned error: %v", err)
+	}
+
+	assertMkdirPerm(t, fs, "/staging", shared.StagingDirMode)
+}
+
+func TestBackend_Restore_KeepsKopiaConfigDirOwnerOnly(t *testing.T) {
+	runner := &fakeEnvRunner{
+		outputs: map[string][]byte{
+			"snapshot list /staging --json --config-file=" + globalConfigPath: []byte(`[{"id":"k1a"}]`),
+		},
+	}
+	fs := newFakeFileSystem("/repos/global")
+	backend := testBackend(runner, fs, &fakeLogger{})
+
+	if err := backend.Restore("/staging"); err != nil {
+		t.Fatalf("Restore returned error: %v", err)
+	}
+
+	assertMkdirPerm(t, fs, "/repos/.kopia-config", 0o700)
 }

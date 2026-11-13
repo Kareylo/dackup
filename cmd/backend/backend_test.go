@@ -39,8 +39,9 @@ func newTestServiceWithSecretKey(t *testing.T, input string) commandService {
 
 func TestConfigureBackend_ConfiguresBorg(t *testing.T) {
 	// name -> borg, backend_dir -> /mnt/backup/borg-repos, bin -> (empty),
-	// global_repo_name -> (default), encryption -> none, compression -> (empty)
-	service := newTestServiceWithSecretKey(t, "borg\n/mnt/backup/borg-repos\n\n\nnone\n\n")
+	// global_repo_name -> (default), encryption -> none, confirm no
+	// encryption -> y, compression -> (empty)
+	service := newTestServiceWithSecretKey(t, "borg\n/mnt/backup/borg-repos\n\n\nnone\ny\n\n")
 
 	config, configured, err := service.configureBackend(shared.DackupConfig{User: "test-user"})
 	if err != nil {
@@ -67,8 +68,9 @@ func TestConfigureBackend_ConfiguresBorg(t *testing.T) {
 func TestConfigureBackend_UpdatePrefillsExistingBackendDir(t *testing.T) {
 	// name -> borg, backend_dir -> (kept via empty input, pre-filled from
 	// current), bin -> (empty), global_repo_name -> (default),
-	// encryption -> none, compression -> (empty)
-	service := newTestServiceWithSecretKey(t, "borg\n\n\n\nnone\n\n")
+	// encryption -> none, confirm no encryption -> y, compression ->
+	// (empty)
+	service := newTestServiceWithSecretKey(t, "borg\n\n\n\nnone\ny\n\n")
 
 	config, configured, err := service.configureBackend(shared.DackupConfig{
 		User:       "test-user",
@@ -328,8 +330,8 @@ func TestPromptBorgSettings_SwitchingToNoneEncryptionClearsPassphrase(t *testing
 	current.EncryptedPassphrase = "v1:existing-ciphertext"
 
 	// bin -> (empty), global_repo_name -> (kept), encryption -> none,
-	// compression -> (empty)
-	service := newTestServiceWithSecretKey(t, "\n\nnone\n\n")
+	// confirm no encryption -> y, compression -> (empty)
+	service := newTestServiceWithSecretKey(t, "\n\nnone\ny\n\n")
 
 	got, err := service.promptBorgSettings(current)
 	if err != nil {
@@ -346,10 +348,62 @@ func TestPromptBorgSettings_SwitchingToNoneEncryptionClearsPassphrase(t *testing
 	}
 }
 
+func TestPromptBorgSettings_SwitchingToNoneRequiresConfirmation(t *testing.T) {
+	cases := []struct {
+		name   string
+		answer string
+	}{
+		{"default answer", ""},
+		{"explicit no", "n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// bin -> (empty), global_repo_name -> (default), encryption ->
+			// none, confirm no encryption -> answer
+			service := newTestServiceWithSecretKey(t, "\n\nnone\n"+tc.answer+"\n")
+
+			_, err := service.promptBorgSettings(borg.DefaultConfig())
+			if err == nil {
+				t.Fatal("expected an error when unencrypted backups are not confirmed")
+			}
+
+			if !strings.Contains(err.Error(), "none") {
+				t.Fatalf("expected the error to mention encryption %q, got: %v", "none", err)
+			}
+		})
+	}
+}
+
+func TestPromptBorgSettings_KeepingNoneDoesNotAskAgain(t *testing.T) {
+	current := borg.DefaultConfig()
+	current.Encryption = "none"
+	current.EncryptedPassphrase = ""
+
+	// bin -> (empty), global_repo_name -> (kept), encryption -> none
+	// (unchanged, so no confirmation), compression -> zstd,6. If a
+	// confirmation were asked, it would consume "zstd,6".
+	service := newTestServiceWithSecretKey(t, "\n\nnone\nzstd,6\n")
+
+	got, err := service.promptBorgSettings(current)
+	if err != nil {
+		t.Fatalf("promptBorgSettings returned error: %v", err)
+	}
+
+	var settings map[string]any
+	if err := json.Unmarshal(got, &settings); err != nil {
+		t.Fatalf("failed to unmarshal settings: %v", err)
+	}
+
+	if settings["encryption"] != "none" || settings["compression"] != "zstd,6" {
+		t.Fatalf("expected encryption none and compression zstd,6, got %v", settings)
+	}
+}
+
 func TestPromptBorgSettings_EncryptionModeAcceptsListedNumber(t *testing.T) {
 	// bin -> (empty), global_repo_name -> (default), encryption -> 1 (none),
-	// compression -> (empty)
-	service := newTestServiceWithSecretKey(t, "\n\n1\n\n")
+	// confirm no encryption -> y, compression -> (empty)
+	service := newTestServiceWithSecretKey(t, "\n\n1\ny\n\n")
 
 	got, err := service.promptBorgSettings(borg.DefaultConfig())
 	if err != nil {
@@ -368,8 +422,9 @@ func TestPromptBorgSettings_EncryptionModeAcceptsListedNumber(t *testing.T) {
 
 func TestPromptBorgSettings_RejectsUnlistedEncryptionMode(t *testing.T) {
 	// bin -> (empty), global_repo_name -> (default), encryption -> bogus
-	// (rejected) then none, compression -> (empty)
-	service := newTestServiceWithSecretKey(t, "\n\nbogus\nnone\n\n")
+	// (rejected) then none, confirm no encryption -> y, compression ->
+	// (empty)
+	service := newTestServiceWithSecretKey(t, "\n\nbogus\nnone\ny\n\n")
 
 	got, err := service.promptBorgSettings(borg.DefaultConfig())
 	if err != nil {
@@ -679,8 +734,9 @@ func TestPromptKopiaSFTPSettings_KeyfileAuthSkipsPasswordPrompt(t *testing.T) {
 	}
 
 	// host, port -> (default 22), username, path, keyfile_path,
-	// known_hosts_path -> (empty)
-	service := newTestServiceWithSecretKey(t, "backup.example.com\n\ndackup\n/srv/backups\n"+keyPath+"\n\n")
+	// known_hosts_path
+	knownHostsPath := writeKnownHostsFile(t)
+	service := newTestServiceWithSecretKey(t, "backup.example.com\n\ndackup\n/srv/backups\n"+keyPath+"\n"+knownHostsPath+"\n")
 
 	got, err := service.promptKopiaSFTPSettings(nil)
 	if err != nil {
@@ -702,8 +758,9 @@ func TestPromptKopiaSFTPSettings_KeyfileAuthSkipsPasswordPrompt(t *testing.T) {
 
 func TestPromptKopiaSFTPSettings_PasswordAuthWhenNoKeyfileGiven(t *testing.T) {
 	// host, port -> 2222, username, path, keyfile_path -> (empty),
-	// password, known_hosts_path -> (empty)
-	service := newTestServiceWithSecretKey(t, "backup.example.com\n2222\ndackup\n/srv/backups\n\nhunter2\n\n")
+	// password, known_hosts_path
+	knownHostsPath := writeKnownHostsFile(t)
+	service := newTestServiceWithSecretKey(t, "backup.example.com\n2222\ndackup\n/srv/backups\n\nhunter2\n"+knownHostsPath+"\n")
 
 	got, err := service.promptKopiaSFTPSettings(nil)
 	if err != nil {
@@ -1052,8 +1109,8 @@ func TestPromptBackendSettings_InvalidCurrentBorgSettingsFallBackToDefaults(t *t
 	current := json.RawMessage(`{invalid-json`)
 
 	// bin -> (empty), global_repo_name -> (default), encryption -> none,
-	// compression -> (empty).
-	service := newTestServiceWithSecretKey(t, "\n\nnone\n\n")
+	// confirm no encryption -> y, compression -> (empty).
+	service := newTestServiceWithSecretKey(t, "\n\nnone\ny\n\n")
 
 	got, err := service.promptBackendSettings(borg.Name, borg.Name, current)
 	if err != nil {
@@ -1078,8 +1135,9 @@ func TestPromptKopiaSettings_SelectsSFTPStorageAndGathersItsSettings(t *testing.
 
 	// bin -> (empty), global_repo_name -> (default), storage_type -> sftp,
 	// host, port -> (default), username, path, keyfile_path,
-	// known_hosts_path -> (empty), password -> hunter2, compression -> (empty).
-	input := "\n\nsftp\nbackup.example.com\n\ndackup\n/srv/backups\n" + keyPath + "\n\nhunter2\n\n"
+	// known_hosts_path, password -> hunter2, compression -> (empty).
+	knownHostsPath := writeKnownHostsFile(t)
+	input := "\n\nsftp\nbackup.example.com\n\ndackup\n/srv/backups\n" + keyPath + "\n" + knownHostsPath + "\nhunter2\n\n"
 	service := newTestServiceWithSecretKey(t, input)
 
 	got, err := service.promptKopiaSettings(kopia.DefaultConfig())
@@ -1392,10 +1450,60 @@ func captureStdout(t *testing.T, fn func()) string {
 	return string(output)
 }
 
+// writeKnownHostsFile creates a known_hosts file for the kopia SFTP prompt,
+// which only accepts a path to an existing file.
+func writeKnownHostsFile(t *testing.T) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "known_hosts")
+	if err := os.WriteFile(path, []byte("backup.example.com ssh-ed25519 AAAA\n"), 0o600); err != nil {
+		t.Fatalf("failed to create known_hosts file: %v", err)
+	}
+
+	return path
+}
+
+// Kopia refuses to connect over SFTP without a known_hosts file, so the
+// prompt must re-ask on an empty answer instead of offering to skip host
+// key verification.
+func TestPromptKopiaSFTPSettings_RequiresKnownHostsPath(t *testing.T) {
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	if err := os.WriteFile(keyPath, []byte("fake key"), 0o600); err != nil {
+		t.Fatalf("failed to create fake keyfile: %v", err)
+	}
+	knownHostsPath := writeKnownHostsFile(t)
+
+	// host, port -> (default 22), username, path, keyfile_path,
+	// known_hosts_path -> (empty, rejected), known_hosts_path
+	service := newTestServiceWithSecretKey(t, "backup.example.com\n\ndackup\n/srv/backups\n"+keyPath+"\n\n"+knownHostsPath+"\n")
+
+	var got sftp.Storage
+	output := captureStdout(t, func() {
+		var err error
+		got, err = service.promptKopiaSFTPSettings(nil)
+		if err != nil {
+			t.Fatalf("promptKopiaSFTPSettings returned error: %v", err)
+		}
+	})
+
+	if got.KnownHostsPath != knownHostsPath {
+		t.Fatalf("expected known_hosts_path %q, got %q", knownHostsPath, got.KnownHostsPath)
+	}
+
+	if !strings.Contains(output, "This value is required.") {
+		t.Fatalf("expected an empty known_hosts_path to be rejected, got %q", output)
+	}
+
+	if strings.Contains(output, "skip host key verification") {
+		t.Fatalf("expected the prompt not to offer skipping host key verification, got %q", output)
+	}
+}
+
 func TestPromptKopiaSFTPSettings_PasswordAuthWarnsAboutProcessListExposure(t *testing.T) {
 	// host, port -> (default 22), username, path, keyfile_path -> (empty),
-	// password, known_hosts_path -> (empty)
-	service := newTestServiceWithSecretKey(t, "backup.example.com\n\ndackup\n/srv/backups\n\nhunter2\n\n")
+	// password, known_hosts_path
+	knownHostsPath := writeKnownHostsFile(t)
+	service := newTestServiceWithSecretKey(t, "backup.example.com\n\ndackup\n/srv/backups\n\nhunter2\n"+knownHostsPath+"\n")
 
 	output := captureStdout(t, func() {
 		if _, err := service.promptKopiaSFTPSettings(nil); err != nil {
@@ -1414,7 +1522,8 @@ func TestPromptKopiaSFTPSettings_KeyfileAuthDoesNotWarn(t *testing.T) {
 		t.Fatalf("failed to create fake keyfile: %v", err)
 	}
 
-	service := newTestServiceWithSecretKey(t, "backup.example.com\n\ndackup\n/srv/backups\n"+keyPath+"\n\n")
+	knownHostsPath := writeKnownHostsFile(t)
+	service := newTestServiceWithSecretKey(t, "backup.example.com\n\ndackup\n/srv/backups\n"+keyPath+"\n"+knownHostsPath+"\n")
 
 	output := captureStdout(t, func() {
 		if _, err := service.promptKopiaSFTPSettings(nil); err != nil {

@@ -86,6 +86,18 @@ Clean build artifacts:
 make clean
 ```
 
+### Prebuilt binaries
+
+Each tagged release publishes `dackup-<os>-<arch>` binaries for linux and darwin (amd64, arm64), a `SHA256SUMS` file, and a signed build provenance attestation for every binary.
+
+Check that a downloaded binary was built by this repository's release workflow (requires the [GitHub CLI](https://cli.github.com/)):
+
+```bash
+gh attestation verify dackup-linux-amd64 --repo Kareylo/dackup
+```
+
+`SHA256SUMS` only detects a corrupted download: it is published in the same release as the binaries, so it cannot prove where they came from. Use the attestation for that.
+
 ## Configuration
 
 The default configuration file is:
@@ -192,6 +204,20 @@ Example configuration:
 | `to_stop` | Whether the container should be stopped before backup or restore. |
 | `paths` | Paths to back up and restore, relative to the configured source/destination roots. Absolute-looking paths are cleaned and treated relative to those roots. |
 | `contains` | Dependent containers to include automatically when this container is selected. |
+
+### Secret key
+
+Every `encrypted_*` value in `backend_settings` (borg passphrases, kopia/restic repository passwords, storage keys, SFTP/WebDAV/REST/Swift passwords) is encrypted with AES-256-GCM using a key stored at:
+
+```text
+~/.config/dackup/secret.key
+```
+
+`~` is the home directory of the user running dackup. The key is created with mode `0600` the first time a secret is encrypted, and dackup refuses to use it if group or other users can access it.
+
+What it protects against: secrets leaking through a copied, shared or committed config file. What it does not protect against: anyone who can read that user's home directory, since the key sits next to the config it decrypts.
+
+**Back up `secret.key` separately.** Without it, dackup cannot decrypt the repository password, so restoring on a new machine is impossible even with an intact backup. Keep a copy (or the plaintext passwords themselves) in a password manager or another offline location, not in `staging_dir`, `backend_dir` or the backup target. If the key is lost but you still know the passwords, run `dackup backend update` to re-enter them; a new key is created automatically.
 
 ## Backup
 
@@ -360,6 +386,8 @@ go build -o build/dackup .
 - Make sure Docker container names match the names in your configuration.
 - Use `--dry-run` before running a backup or restore for the first time.
 - Restore uses `rsync -a --delete`, so destination files not present in the backup source can be removed.
+- `staging_dir` holds a plaintext copy of your application data and is not cleaned up after a run. Directories dackup creates under it get mode `0750`, but the staging root itself should be owned by the configured `user`/`group` with mode `0750` or stricter (e.g. `chmod 750 /backups/in`). Staging directories created by older dackup versions keep their `0755` mode until you change it.
+- With a backend configured, `restore` replaces each restored path in `staging_dir` with the archive's content before copying it to `data_dir`: files in staging that the archive does not have are removed, so they cannot come back into the live data.
 
 # TODO
 Here is a list of todo things that should be implemented :

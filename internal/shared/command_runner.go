@@ -57,11 +57,11 @@ type EnvCommandRunner interface {
 type OSCommandRunner struct{}
 
 func (OSCommandRunner) Run(name string, args ...string) error {
-	return exec.Command(name, args...).Run()
+	return exec.Command(name, args...).Run() // #nosec G204 -- argv vector, no shell; callers validate config-derived args
 }
 
 func (OSCommandRunner) Output(name string, args ...string) ([]byte, error) {
-	return exec.Command(name, args...).Output()
+	return exec.Command(name, args...).Output() // #nosec G204 -- argv vector, no shell; callers validate config-derived args
 }
 
 func (OSCommandRunner) LookPath(file string) (string, error) {
@@ -69,7 +69,7 @@ func (OSCommandRunner) LookPath(file string) (string, error) {
 }
 
 func (OSCommandRunner) RunInDirWithEnv(dir string, env []string, name string, args ...string) error {
-	cmd := exec.Command(name, args...)
+	cmd := exec.Command(name, args...) // #nosec G204 -- argv vector, no shell; callers validate config-derived args
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -79,7 +79,7 @@ func (OSCommandRunner) RunInDirWithEnv(dir string, env []string, name string, ar
 }
 
 func (OSCommandRunner) OutputWithEnv(env []string, name string, args ...string) ([]byte, error) {
-	cmd := exec.Command(name, args...)
+	cmd := exec.Command(name, args...) // #nosec G204 -- argv vector, no shell; callers validate config-derived args
 	cmd.Env = append(os.Environ(), env...)
 
 	return cmd.Output()
@@ -117,7 +117,7 @@ func (runner LoggedCommandRunner) Run(name string, args ...string) error {
 		fmt.Printf("Running: %s %s\n", name, strings.Join(redactArgs(args), " "))
 	}
 
-	cmd := exec.Command(name, args...)
+	cmd := exec.Command(name, args...) // #nosec G204 -- argv vector, no shell; callers validate config-derived args
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 
@@ -158,7 +158,7 @@ func (runner LoggedCommandRunner) RunInDirWithEnv(dir string, env []string, name
 		fmt.Printf("Running: %s %s\n", name, strings.Join(redactArgs(args), " "))
 	}
 
-	cmd := exec.Command(name, args...)
+	cmd := exec.Command(name, args...) // #nosec G204 -- argv vector, no shell; callers validate config-derived args
 	if dir != "" {
 		cmd.Dir = dir
 	}

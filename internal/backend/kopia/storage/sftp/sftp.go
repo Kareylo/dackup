@@ -39,8 +39,8 @@ type Storage struct {
 	// Mutually exclusive with KeyfilePath.
 	EncryptedPassword string `json:"encrypted_password,omitempty"`
 
-	// KnownHostsPath is an optional path to a known_hosts file for host key
-	// verification. Empty leaves kopia's own default behavior in place.
+	// KnownHostsPath is a path to a known_hosts file holding the server's
+	// host key. Required: kopia refuses to connect over SFTP without one.
 	KnownHostsPath string `json:"known_hosts_path,omitempty"`
 }
 
@@ -65,6 +65,10 @@ func (s Storage) Validate() error {
 		return fmt.Errorf("kopia sftp storage requires exactly one of keyfile_path or encrypted_password")
 	}
 
+	if strings.TrimSpace(s.KnownHostsPath) == "" {
+		return fmt.Errorf("kopia sftp storage requires known_hosts_path (kopia refuses to connect without host key verification)")
+	}
+
 	return nil
 }
 
@@ -74,6 +78,14 @@ func (s Storage) port() int {
 	}
 
 	return DefaultPort
+}
+
+// UsesPasswordAuth reports whether BuildInvocation will pass the password
+// as --sftp-password, i.e. a password is set and no keyfile overrides it.
+// Kopia binds no env var to that flag, so the password is then visible in
+// the process list while kopia runs.
+func (s Storage) UsesPasswordAuth() bool {
+	return strings.TrimSpace(s.KeyfilePath) == "" && strings.TrimSpace(s.EncryptedPassword) != ""
 }
 
 // BuildInvocation implements storage.Provider.

@@ -64,6 +64,16 @@ func (r *fakeEnvRunner) OutputWithEnv(env []string, name string, args ...string)
 	return nil, nil
 }
 
+// exitCodeError stands in for the *exec.ExitError a real restic run
+// returns, carrying only the exit code restic's "cat config" probe is
+// classified by (10: repository does not exist, 12: wrong password).
+type exitCodeError struct {
+	code int
+}
+
+func (e exitCodeError) Error() string { return fmt.Sprintf("exit status %d", e.code) }
+func (e exitCodeError) ExitCode() int { return e.code }
+
 // runnerWithoutEnvSupport implements shared.CommandRunner but not
 // shared.EnvCommandRunner, for testing the capability-missing error path.
 type runnerWithoutEnvSupport struct{}
@@ -74,12 +84,21 @@ func (runnerWithoutEnvSupport) LookPath(file string) (string, error)            
 
 type fakeFileSystem struct {
 	mkdirs []string
+	// mkdirPerms[i] is the perm passed with mkdirs[i].
+	mkdirPerms []os.FileMode
+	removed    []string
 }
 
 func (fs *fakeFileSystem) Stat(name string) (os.FileInfo, error) { return nil, os.ErrNotExist }
 
 func (fs *fakeFileSystem) MkdirAll(path string, perm os.FileMode) error {
 	fs.mkdirs = append(fs.mkdirs, path)
+	fs.mkdirPerms = append(fs.mkdirPerms, perm)
+	return nil
+}
+
+func (fs *fakeFileSystem) RemoveAll(path string) error {
+	fs.removed = append(fs.removed, path)
 	return nil
 }
 
@@ -247,7 +266,7 @@ func TestBackend_Backup_DryRunMakesNoCalls(t *testing.T) {
 
 func TestBackend_Backup_InitializesRepoThenBacksUp(t *testing.T) {
 	runner := &fakeEnvRunner{
-		outErrs: map[string]error{"cat config -r /repos/global": fmt.Errorf("repository does not exist")},
+		outErrs: map[string]error{"cat config -r /repos/global": exitCodeError{code: 10}},
 	}
 	backend := testBackend(runner, &fakeFileSystem{}, &fakeLogger{})
 
@@ -353,7 +372,7 @@ func TestBackend_Restore_DryRunMakesNoCalls(t *testing.T) {
 
 func TestBackend_Restore_RepoNotInitializedIsGracefulNoOp(t *testing.T) {
 	runner := &fakeEnvRunner{
-		outErrs: map[string]error{"cat config -r /repos/global": fmt.Errorf("repository does not exist")},
+		outErrs: map[string]error{"cat config -r /repos/global": exitCodeError{code: 10}},
 	}
 	logger := &fakeLogger{}
 	backend := testBackend(runner, &fakeFileSystem{}, logger)
@@ -368,6 +387,65 @@ func TestBackend_Restore_RepoNotInitializedIsGracefulNoOp(t *testing.T) {
 
 	if !hasMessageContaining(logger.messages, "does not exist yet") {
 		t.Fatalf("expected a log message about the missing repo, got %v", logger.messages)
+	}
+}
+
+// A failed "cat config" probe is only "nothing to restore" when restic
+// says the repository does not exist (exit 10). A wrong password, an
+// unreachable backend, or an error without an exit code must fail the
+// restore, so dackup never treats an outage as an empty repository.
+func TestBackend_Restore_ProbeFailureOtherThanMissingRepoReturnsError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{"wrong password", exitCodeError{code: 12}},
+		{"unreachable backend", exitCodeError{code: 1}},
+		{"no exit code", fmt.Errorf("context deadline exceeded")},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &fakeEnvRunner{
+				outErrs: map[string]error{"cat config -r /repos/global": tc.err},
+			}
+			logger := &fakeLogger{}
+			backend := testBackend(runner, &fakeFileSystem{}, logger)
+
+			err := backend.Restore("/staging")
+			if err == nil {
+				t.Fatal("expected Restore to return an error")
+			}
+
+			if !strings.Contains(err.Error(), "/repos/global") {
+				t.Fatalf("expected the error to name the repository, got %v", err)
+			}
+
+			if len(runner.calls) != 1 {
+				t.Fatalf("expected only the cat config probe call, got %+v", runner.calls)
+			}
+
+			if hasMessageContaining(logger.messages, "nothing to restore") {
+				t.Fatalf("expected no \"nothing to restore\" message, got %v", logger.messages)
+			}
+		})
+	}
+}
+
+// Backup must not try "restic init" on a repository it merely failed to
+// open: only a confirmed "does not exist" (exit 10) leads to init.
+func TestBackend_Backup_ProbeFailureOtherThanMissingRepoReturnsErrorWithoutInit(t *testing.T) {
+	runner := &fakeEnvRunner{
+		outErrs: map[string]error{"cat config -r /repos/global": exitCodeError{code: 12}},
+	}
+	backend := testBackend(runner, &fakeFileSystem{}, &fakeLogger{})
+
+	if err := backend.Backup("/staging"); err == nil {
+		t.Fatal("expected Backup to return an error")
+	}
+
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected only the cat config probe call (no init, no backup), got %+v", runner.calls)
 	}
 }
 
@@ -530,6 +608,66 @@ func TestBackend_BinaryName_UsesConfiguredBin(t *testing.T) {
 	}
 }
 
+// restic restore never deletes extra files (and its --delete would wipe
+// the other groups' data in the shared staging directory), so each
+// group's own configured paths are cleared first. A path that cleans to
+// the staging root itself ("/") is never removed.
+func TestBackend_RestoreGroups_ClearsEachGroupPathBeforeRestoring(t *testing.T) {
+	runner := &fakeEnvRunner{}
+	fs := &fakeFileSystem{}
+	backend := testBackend(runner, fs, &fakeLogger{})
+
+	groups := []shared.BackendGroup{
+		{Name: "paperless", Paths: []string{"data/paperless", "/"}},
+		{Name: "adguard", Paths: []string{"/config/adguard"}},
+	}
+
+	if err := backend.RestoreGroups("/staging", groups); err != nil {
+		t.Fatalf("RestoreGroups returned error: %v", err)
+	}
+
+	want := []string{"/staging/data/paperless", "/staging/config/adguard"}
+	if !equalArgs(fs.removed, want) {
+		t.Fatalf("expected removed paths %v, got %v", want, fs.removed)
+	}
+}
+
+// A repository restic reports as missing (exit 10) has nothing to restore,
+// so staging must be left exactly as it was.
+func TestBackend_RestoreGroups_MissingRepoLeavesStagingAlone(t *testing.T) {
+	runner := &fakeEnvRunner{
+		outErrs: map[string]error{"cat config -r /repos/paperless": exitCodeError{code: 10}},
+	}
+	fs := &fakeFileSystem{}
+	backend := testBackend(runner, fs, &fakeLogger{})
+
+	groups := []shared.BackendGroup{{Name: "paperless", Paths: []string{"data/paperless"}}}
+
+	if err := backend.RestoreGroups("/staging", groups); err != nil {
+		t.Fatalf("RestoreGroups returned error: %v", err)
+	}
+
+	if len(fs.removed) != 0 {
+		t.Fatalf("expected nothing removed from staging, got %v", fs.removed)
+	}
+}
+
+// The ungrouped Restore restores the global repository and has no list of
+// configured paths, so it must never clear anything in staging.
+func TestBackend_Restore_GlobalRestoreDoesNotClearStaging(t *testing.T) {
+	runner := &fakeEnvRunner{}
+	fs := &fakeFileSystem{}
+	backend := testBackend(runner, fs, &fakeLogger{})
+
+	if err := backend.Restore("/staging"); err != nil {
+		t.Fatalf("Restore returned error: %v", err)
+	}
+
+	if len(fs.removed) != 0 {
+		t.Fatalf("expected nothing removed from staging, got %v", fs.removed)
+	}
+}
+
 func TestBackend_RestoreGroups_RejectsGroupNameCollidingWithGlobalRepoName(t *testing.T) {
 	runner := &fakeEnvRunner{}
 	backend := testBackend(runner, &fakeFileSystem{}, &fakeLogger{})
@@ -594,4 +732,43 @@ func hasMessageContaining(messages []string, substr string) bool {
 		}
 	}
 	return false
+}
+
+// mkdirPerm returns the perm the last MkdirAll call for path used, and
+// whether there was one.
+func (fs *fakeFileSystem) mkdirPerm(path string) (os.FileMode, bool) {
+	for i := len(fs.mkdirs) - 1; i >= 0; i-- {
+		if fs.mkdirs[i] == path {
+			return fs.mkdirPerms[i], true
+		}
+	}
+
+	return 0, false
+}
+
+// assertMkdirPerm fails t unless path was created with want.
+func assertMkdirPerm(t *testing.T, fs *fakeFileSystem, path string, want os.FileMode) {
+	t.Helper()
+
+	got, ok := fs.mkdirPerm(path)
+	if !ok {
+		t.Fatalf("expected MkdirAll(%s), got calls for %v", path, fs.mkdirs)
+	}
+
+	if got != want {
+		t.Fatalf("expected %s to be created with mode %#o, got %#o", path, want, got)
+	}
+}
+
+// --- Staging directory permissions ---
+
+func TestBackend_Restore_CreatesStagingDirWithStagingDirMode(t *testing.T) {
+	fs := &fakeFileSystem{}
+	backend := testBackend(&fakeEnvRunner{}, fs, &fakeLogger{})
+
+	if err := backend.Restore("/staging"); err != nil {
+		t.Fatalf("Restore returned error: %v", err)
+	}
+
+	assertMkdirPerm(t, fs, "/staging", shared.StagingDirMode)
 }

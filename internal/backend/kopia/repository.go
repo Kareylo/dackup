@@ -6,7 +6,9 @@ import (
 	"dackup/internal/backend/kopia/storage/webdav"
 	"dackup/internal/shared"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -58,9 +60,11 @@ func (backend Backend) snapshotRepo(stagingDir string, repoName string, relative
 
 // restoreRepo connects to the named repository (if it exists) and restores
 // the latest snapshot of each entry in relativePaths back into its place
-// under stagingDir. It never creates a repository — a restore against a
-// repository that doesn't exist (or can't be reached) is a graceful no-op,
-// not an error, since there's nothing to restore either way.
+// under stagingDir. It never creates a repository. A failed connect is an
+// error: kopia gives no reliable way to tell "never created" from an
+// outage, a wrong password or expired credentials. The one provable
+// "never created" case, filesystem storage whose repository directory is
+// missing, is a graceful no-op without connecting.
 func (backend Backend) restoreRepo(stagingDir string, repoName string, relativePaths []string) error {
 	if backend.dryRun() {
 		backend.log("INFO", fmt.Sprintf("[dry-run] Would restore the latest kopia snapshots for repository %q into %s (paths: %v)", repoName, stagingDir, relativePaths))
@@ -77,6 +81,13 @@ func (backend Backend) restoreRepo(stagingDir string, repoName string, relativeP
 		return err
 	}
 
+	if backend.Config.storageType() == filesystem.Name {
+		if _, err := backend.fileSystem().Stat(backend.repoPath(repoName)); errors.Is(err, os.ErrNotExist) {
+			backend.log("WARN", fmt.Sprintf("Kopia repository %q does not exist yet; nothing to restore", repoName))
+			return nil
+		}
+	}
+
 	configPath := backend.configPath(repoName)
 
 	if err := backend.fileSystem().MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
@@ -89,8 +100,7 @@ func (backend Backend) restoreRepo(stagingDir string, repoName string, relativeP
 	}
 
 	if err := envRunner.RunInDirWithEnv("", append(append([]string{}, passwordEnv...), connectEnv...), backend.Config.bin(), connectArgs...); err != nil {
-		backend.log("WARN", fmt.Sprintf("Kopia repository %q does not exist yet (or could not be reached: %v); nothing to restore", repoName, err))
-		return nil
+		return fmt.Errorf("failed to connect to kopia repository %q for restore: %w", repoName, err)
 	}
 
 	env, err := backend.repoEnv(repoName, passwordEnv)
@@ -111,13 +121,15 @@ func (backend Backend) restoreRepo(stagingDir string, repoName string, relativeP
 			continue
 		}
 
-		if err := backend.fileSystem().MkdirAll(target, 0o755); err != nil {
+		if err := backend.fileSystem().MkdirAll(target, shared.StagingDirMode); err != nil {
 			return fmt.Errorf("failed to create restore target %s: %w", target, err)
 		}
 
 		backend.log("INFO", fmt.Sprintf("Restoring kopia snapshot %s into %s", snapshotID, target))
 
-		if err := envRunner.RunInDirWithEnv("", env, backend.Config.bin(), "snapshot", "restore", snapshotID, target, "--config-file="+configPath); err != nil {
+		// --delete-extra removes files the snapshot doesn't have from this
+		// one target, so leftovers in staging never reach the live data.
+		if err := envRunner.RunInDirWithEnv("", env, backend.Config.bin(), "snapshot", "restore", snapshotID, target, "--delete-extra", "--config-file="+configPath); err != nil {
 			return fmt.Errorf("kopia snapshot restore failed for %s: %w", snapshotID, err)
 		}
 	}

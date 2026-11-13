@@ -99,8 +99,9 @@ func TestRunBackendCreateWithReader_ConfiguresAndWritesBackend(t *testing.T) {
 	}
 
 	// name -> borg, backend_dir, bin -> (empty), global_repo_name ->
-	// (default), encryption -> none, compression -> (empty).
-	input := "borg\n/mnt/backup/borg-repos\n\n\nnone\n\n"
+	// (default), encryption -> none, confirm no encryption -> y,
+	// compression -> (empty).
+	input := "borg\n/mnt/backup/borg-repos\n\n\nnone\ny\n\n"
 
 	if err := runBackendCreateWithReader(backendReaderFor(input)); err != nil {
 		t.Fatalf("runBackendCreateWithReader returned error: %v", err)

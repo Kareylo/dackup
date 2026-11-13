@@ -63,6 +63,9 @@ func (runnerWithoutEnvSupport) LookPath(file string) (string, error)            
 type fakeFileSystem struct {
 	existing map[string]bool
 	mkdirs   []string
+	// mkdirPerms[i] is the perm passed with mkdirs[i].
+	mkdirPerms []os.FileMode
+	removed    []string
 }
 
 func newFakeFileSystem(existing ...string) *fakeFileSystem {
@@ -82,7 +85,14 @@ func (fs *fakeFileSystem) Stat(name string) (os.FileInfo, error) {
 
 func (fs *fakeFileSystem) MkdirAll(path string, perm os.FileMode) error {
 	fs.mkdirs = append(fs.mkdirs, path)
+	fs.mkdirPerms = append(fs.mkdirPerms, perm)
 	fs.existing[path] = true
+	return nil
+}
+
+func (fs *fakeFileSystem) RemoveAll(path string) error {
+	fs.removed = append(fs.removed, path)
+	delete(fs.existing, path)
 	return nil
 }
 
@@ -502,6 +512,83 @@ func TestBackend_RestoreGroups_ExtractsFromEachGroupRepoOnly(t *testing.T) {
 	}
 }
 
+// A restore must not leave files in staging that the archive doesn't have:
+// borg extract never deletes, so each group's own configured paths are
+// cleared first. A path that cleans to the staging root itself ("/") is
+// never removed.
+func TestBackend_RestoreGroups_ClearsEachGroupPathBeforeExtracting(t *testing.T) {
+	runner := &fakeEnvRunner{
+		outputs: map[string][]byte{
+			"list /repos/paperless --last 1 --short": []byte("20260810-020000\n"),
+			"list /repos/adguard --last 1 --short":   []byte("20260810-030000\n"),
+		},
+	}
+	fs := newFakeFileSystem("/repos/paperless/config", "/repos/adguard/config")
+	backend := testBackend(runner, fs, &fakeLogger{})
+	backend.Config.EncryptedPassphrase = "enc:hunter2"
+
+	groups := []shared.BackendGroup{
+		{Name: "paperless", Paths: []string{"data/paperless", "/"}},
+		{Name: "adguard", Paths: []string{"/config/adguard"}},
+	}
+
+	if err := backend.RestoreGroups("/staging", groups); err != nil {
+		t.Fatalf("RestoreGroups returned error: %v", err)
+	}
+
+	want := []string{"/staging/data/paperless", "/staging/config/adguard"}
+	if !equalArgs(fs.removed, want) {
+		t.Fatalf("expected removed paths %v, got %v", want, fs.removed)
+	}
+}
+
+// When there is nothing to restore (no repository, or no archive yet),
+// staging must be left exactly as it was.
+func TestBackend_RestoreGroups_NoOpRestoreLeavesStagingAlone(t *testing.T) {
+	runner := &fakeEnvRunner{
+		outputs: map[string][]byte{
+			"list /repos/adguard --last 1 --short": []byte(""),
+		},
+	}
+	fs := newFakeFileSystem("/repos/adguard/config")
+	backend := testBackend(runner, fs, &fakeLogger{})
+	backend.Config.EncryptedPassphrase = "enc:hunter2"
+
+	groups := []shared.BackendGroup{
+		{Name: "paperless", Paths: []string{"data/paperless"}},
+		{Name: "adguard", Paths: []string{"config/adguard"}},
+	}
+
+	if err := backend.RestoreGroups("/staging", groups); err != nil {
+		t.Fatalf("RestoreGroups returned error: %v", err)
+	}
+
+	if len(fs.removed) != 0 {
+		t.Fatalf("expected nothing removed from staging, got %v", fs.removed)
+	}
+}
+
+// The ungrouped Restore extracts the global repository (".") and has no
+// list of configured paths, so it must never clear anything in staging.
+func TestBackend_Restore_GlobalRestoreDoesNotClearStaging(t *testing.T) {
+	runner := &fakeEnvRunner{
+		outputs: map[string][]byte{
+			"list /repos/global --last 1 --short": []byte("20260810-020000\n"),
+		},
+	}
+	fs := newFakeFileSystem("/repos/global/config")
+	backend := testBackend(runner, fs, &fakeLogger{})
+	backend.Config.EncryptedPassphrase = "enc:hunter2"
+
+	if err := backend.Restore("/staging"); err != nil {
+		t.Fatalf("Restore returned error: %v", err)
+	}
+
+	if len(fs.removed) != 0 {
+		t.Fatalf("expected nothing removed from staging, got %v", fs.removed)
+	}
+}
+
 // --- Name ---
 
 func TestBackend_Name(t *testing.T) {
@@ -540,4 +627,159 @@ func hasMessageContaining(messages []string, substr string) bool {
 		}
 	}
 	return false
+}
+
+// --- Unencrypted repository warning ---
+
+// unencryptedWarnings returns the WARN lines about a repository being
+// initialized without encryption.
+func unencryptedWarnings(logger *fakeLogger) []string {
+	var warnings []string
+	for _, message := range logger.messages {
+		if strings.HasPrefix(message, "WARN: ") && strings.Contains(message, "WITHOUT encryption") {
+			warnings = append(warnings, message)
+		}
+	}
+
+	return warnings
+}
+
+func TestBackend_Backup_InitWithNoneEncryptionWarns(t *testing.T) {
+	runner := &fakeEnvRunner{}
+	logger := &fakeLogger{}
+	backend := testBackend(runner, newFakeFileSystem(), logger)
+	backend.Config.Encryption = "none"
+
+	if err := backend.Backup("/staging"); err != nil {
+		t.Fatalf("Backup returned error: %v", err)
+	}
+
+	warnings := unencryptedWarnings(logger)
+	if len(warnings) != 1 {
+		t.Fatalf("expected one unencrypted-repository warning, got %d: %v", len(warnings), logger.messages)
+	}
+
+	if !strings.Contains(warnings[0], "/repos/global") {
+		t.Fatalf("expected the warning to name the repository path, got: %s", warnings[0])
+	}
+
+	if runner.calls[0].args[0] != "init" || runner.calls[0].args[1] != "--encryption=none" {
+		t.Fatalf("expected the repository to still be initialized with --encryption=none, got %+v", runner.calls[0])
+	}
+}
+
+func TestBackend_Backup_InitWithEncryptionDoesNotWarn(t *testing.T) {
+	logger := &fakeLogger{}
+	backend := testBackend(&fakeEnvRunner{}, newFakeFileSystem(), logger)
+	backend.Config.EncryptedPassphrase = "enc:hunter2"
+
+	if err := backend.Backup("/staging"); err != nil {
+		t.Fatalf("Backup returned error: %v", err)
+	}
+
+	if warnings := unencryptedWarnings(logger); len(warnings) != 0 {
+		t.Fatalf("expected no unencrypted-repository warning for repokey, got: %v", warnings)
+	}
+}
+
+func TestBackend_Backup_ExistingNoneRepoDoesNotWarnAgain(t *testing.T) {
+	logger := &fakeLogger{}
+	backend := testBackend(&fakeEnvRunner{}, newFakeFileSystem("/repos/global/config"), logger)
+	backend.Config.Encryption = "none"
+
+	if err := backend.Backup("/staging"); err != nil {
+		t.Fatalf("Backup returned error: %v", err)
+	}
+
+	if warnings := unencryptedWarnings(logger); len(warnings) != 0 {
+		t.Fatalf("expected no warning when the repository already exists, got: %v", warnings)
+	}
+}
+
+func TestBackend_BackupGroups_WarnsForEachNewUnencryptedRepo(t *testing.T) {
+	logger := &fakeLogger{}
+	backend := testBackend(&fakeEnvRunner{}, newFakeFileSystem("/repos/db/config"), logger)
+	backend.Config.Encryption = "none"
+
+	groups := []shared.BackendGroup{
+		{Name: "app", Paths: []string{"app"}},
+		{Name: "db", Paths: []string{"db"}},
+	}
+
+	if err := backend.BackupGroups("/staging", groups); err != nil {
+		t.Fatalf("BackupGroups returned error: %v", err)
+	}
+
+	// app and global are new; db already exists.
+	warnings := unencryptedWarnings(logger)
+	if len(warnings) != 2 {
+		t.Fatalf("expected two warnings (app, global), got %d: %v", len(warnings), warnings)
+	}
+
+	joined := strings.Join(warnings, "\n")
+	for _, want := range []string{"/repos/app", "/repos/global"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected a warning for %s, got: %v", want, warnings)
+		}
+	}
+	if strings.Contains(joined, "/repos/db") {
+		t.Fatalf("expected no warning for the existing db repository, got: %v", warnings)
+	}
+}
+
+// mkdirPerm returns the perm the last MkdirAll call for path used, and
+// whether there was one.
+func (fs *fakeFileSystem) mkdirPerm(path string) (os.FileMode, bool) {
+	for i := len(fs.mkdirs) - 1; i >= 0; i-- {
+		if fs.mkdirs[i] == path {
+			return fs.mkdirPerms[i], true
+		}
+	}
+
+	return 0, false
+}
+
+// assertMkdirPerm fails t unless path was created with want.
+func assertMkdirPerm(t *testing.T, fs *fakeFileSystem, path string, want os.FileMode) {
+	t.Helper()
+
+	got, ok := fs.mkdirPerm(path)
+	if !ok {
+		t.Fatalf("expected MkdirAll(%s), got calls for %v", path, fs.mkdirs)
+	}
+
+	if got != want {
+		t.Fatalf("expected %s to be created with mode %#o, got %#o", path, want, got)
+	}
+}
+
+// --- Staging directory permissions ---
+
+func TestBackend_Restore_CreatesStagingDirWithStagingDirMode(t *testing.T) {
+	runner := &fakeEnvRunner{
+		outputs: map[string][]byte{
+			"list /repos/global --last 1 --short": []byte("20260810-020000\n"),
+		},
+	}
+	fs := newFakeFileSystem("/repos/global/config")
+	backend := testBackend(runner, fs, &fakeLogger{})
+	backend.Config.EncryptedPassphrase = "enc:hunter2"
+
+	if err := backend.Restore("/staging"); err != nil {
+		t.Fatalf("Restore returned error: %v", err)
+	}
+
+	assertMkdirPerm(t, fs, "/staging", shared.StagingDirMode)
+}
+
+func TestBackend_Backup_KeepsRepositoryDirOwnerOnly(t *testing.T) {
+	fs := newFakeFileSystem()
+	backend := testBackend(&fakeEnvRunner{}, fs, &fakeLogger{})
+	backend.Config.EncryptedPassphrase = "enc:hunter2"
+
+	if err := backend.Backup("/staging"); err != nil {
+		t.Fatalf("Backup returned error: %v", err)
+	}
+
+	assertMkdirPerm(t, fs, "/repos/global", 0o700)
 }

@@ -444,6 +444,16 @@ func (service commandService) promptResticRestSettings(current *rest.Storage) (r
 		config.EncryptedPassword = encryptedPassword
 	}
 
+	if config.SendsCredentialsInCleartext() {
+		allowInsecureHTTP, err := service.prompt.Bool("The REST URL is not https://, so the password would be sent in cleartext. Allow it anyway?", config.AllowInsecureHTTP)
+		if err != nil {
+			return rest.Storage{}, err
+		}
+		config.AllowInsecureHTTP = allowInsecureHTTP
+	} else {
+		config.AllowInsecureHTTP = false
+	}
+
 	return config, nil
 }
 
@@ -479,6 +489,16 @@ func (service commandService) promptResticSwiftSettings(current *swift.Storage) 
 		return swift.Storage{}, err
 	}
 	config.EncryptedPassword = encryptedPassword
+
+	if config.SendsCredentialsInCleartext() {
+		allowInsecureHTTP, err := service.prompt.Bool("The Swift auth URL is not https://, so the password would be sent in cleartext. Allow it anyway?", config.AllowInsecureHTTP)
+		if err != nil {
+			return swift.Storage{}, err
+		}
+		config.AllowInsecureHTTP = allowInsecureHTTP
+	} else {
+		config.AllowInsecureHTTP = false
+	}
 
 	tenantName, err := service.promptOptionalStringWithCurrent("Swift tenant/project name (leave empty if not required)", config.TenantName)
 	if err != nil {

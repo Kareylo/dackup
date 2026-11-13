@@ -1,6 +1,7 @@
 package kopia
 
 import (
+	"dackup/internal/backend/kopia/storage/sftp"
 	"dackup/internal/shared"
 	"fmt"
 )
@@ -36,12 +37,14 @@ func (backend Backend) BinaryName() string {
 // doesn't know about container groups: stagingDir itself is snapshotted as
 // a single source into the global repository.
 func (backend Backend) Backup(stagingDir string) error {
+	backend.warnSFTPPasswordExposure()
 	return backend.snapshotRepo(stagingDir, backend.Config.GlobalRepoName, []string{"."})
 }
 
 // Restore implements the plain backend.Backend fallback, restoring the
 // latest snapshot of stagingDir from the global repository.
 func (backend Backend) Restore(stagingDir string) error {
+	backend.warnSFTPPasswordExposure()
 	return backend.restoreRepo(stagingDir, backend.Config.GlobalRepoName, []string{"."})
 }
 
@@ -51,6 +54,8 @@ func (backend Backend) Restore(stagingDir string) error {
 // repository is left untouched) rather than snapshotting the whole
 // stagingDir under its name.
 func (backend Backend) BackupGroups(stagingDir string, groups []shared.BackendGroup) error {
+	backend.warnSFTPPasswordExposure()
+
 	if err := backend.validateGroupNames(groups); err != nil {
 		return err
 	}
@@ -75,6 +80,8 @@ func (backend Backend) BackupGroups(stagingDir string, groups []shared.BackendGr
 // operation, since it would restore everything rather than matching
 // backup's per-group granularity.
 func (backend Backend) RestoreGroups(stagingDir string, groups []shared.BackendGroup) error {
+	backend.warnSFTPPasswordExposure()
+
 	if err := backend.validateGroupNames(groups); err != nil {
 		return err
 	}
@@ -86,6 +93,21 @@ func (backend Backend) RestoreGroups(stagingDir string, groups []shared.BackendG
 	}
 
 	return nil
+}
+
+// sftpPasswordWarning is logged once per Backup/Restore/BackupGroups/
+// RestoreGroups call when kopia sftp password auth is configured.
+const sftpPasswordWarning = "kopia sftp storage uses password auth: kopia only accepts the SFTP password as --sftp-password, so any local user can read it in the process list while kopia runs. Set keyfile_path to use an SSH key instead." // #nosec G101 -- warning text, not a credential
+
+// warnSFTPPasswordExposure logs sftpPasswordWarning when the selected
+// storage type is sftp with password auth. It runs once per public call,
+// not per repository, so a run with many container groups warns once.
+func (backend Backend) warnSFTPPasswordExposure() {
+	if backend.Config.StorageType != sftp.Name || backend.Config.SFTP == nil || !backend.Config.SFTP.UsesPasswordAuth() {
+		return
+	}
+
+	backend.log("WARN", sftpPasswordWarning)
 }
 
 func (backend Backend) validateGroupNames(groups []shared.BackendGroup) error {

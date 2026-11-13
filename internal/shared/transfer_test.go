@@ -49,6 +49,10 @@ func (fs fakeTransferFS) MkdirAll(path string, perm os.FileMode) error {
 	return OSFileSystem{}.MkdirAll(path, perm)
 }
 
+func (fs fakeTransferFS) RemoveAll(path string) error {
+	return fmt.Errorf("fakeTransferFS does not support RemoveAll")
+}
+
 func (fs fakeTransferFS) OpenFile(name string, flag int, perm os.FileMode) (*os.File, error) {
 	return OSFileSystem{}.OpenFile(name, flag, perm)
 }
@@ -485,5 +489,44 @@ func TestTransferService_FixRestoreOwnership_SeparatesOptionsFromOperands(t *tes
 	want := [][]string{{"chown", "-R", "--", "user:group", "/data/app"}}
 	if !reflect.DeepEqual(runner.ranCommands, want) {
 		t.Fatalf("expected %#v, got %#v", want, runner.ranCommands)
+	}
+}
+
+func TestStagingDirMode_GivesNoAccessToOthers(t *testing.T) {
+	if StagingDirMode != 0o750 {
+		t.Fatalf("expected StagingDirMode %#o, got %#o", os.FileMode(0o750), StagingDirMode)
+	}
+}
+
+func TestTransferService_SinglePath_CreatesStagingDirsWithoutOtherAccess(t *testing.T) {
+	service := TransferService{
+		Direction: TransferBackup,
+		FS:        fakeTransferFS{},
+		Runner:    &fakeTransferRunner{},
+		Logger:    &fakeTransferLogger{},
+	}
+
+	stagingRoot := t.TempDir()
+	dstPath := filepath.Join(stagingRoot, "data", "app", "db")
+
+	if err := service.SinglePath("app", t.TempDir(), dstPath); err != nil {
+		t.Fatalf("SinglePath returned error: %v", err)
+	}
+
+	// Every directory SinglePath had to create, parents included. The
+	// umask can only remove bits, so this holds for any umask.
+	for _, dir := range []string{
+		filepath.Join(stagingRoot, "data"),
+		filepath.Join(stagingRoot, "data", "app"),
+		dstPath,
+	} {
+		info, err := os.Stat(dir)
+		if err != nil {
+			t.Fatalf("expected %s to exist: %v", dir, err)
+		}
+
+		if perm := info.Mode().Perm(); perm&0o007 != 0 {
+			t.Fatalf("expected %s to give no access to others, got mode %#o", dir, perm)
+		}
 	}
 }

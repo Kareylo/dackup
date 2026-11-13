@@ -16,6 +16,11 @@ const (
 	TransferRestore TransferDirection = "restore"
 )
 
+// StagingDirMode is the mode for directories dackup creates under a
+// staging root: staged data is a plaintext copy of application data, so
+// it gives no access to other users.
+const StagingDirMode os.FileMode = 0o750
+
 // TransferService copies configured container paths between a source and
 // destination root via rsync, in either TransferDirection. It's the
 // staging mechanism, not the backup mechanism itself — see AGENTS.md's
@@ -97,7 +102,7 @@ func (service TransferService) SinglePath(container string, srcPath string, dstP
 		return nil
 	}
 
-	if err := fs.MkdirAll(dstPath, 0o755); err != nil {
+	if err := fs.MkdirAll(dstPath, StagingDirMode); err != nil {
 		return fmt.Errorf("failed to create %s destination directory %s: %w", actionName, dstPath, err)
 	}
 

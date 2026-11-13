@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 // DefaultConfigRelativePath is DefaultDackupConfigPath's path, relative to
@@ -56,11 +57,20 @@ func DefaultDackupConfigPath() (string, error) {
 
 // ReadDackupConfig reads and parses the DackupConfig JSON file at path.
 func ReadDackupConfig(path string) (DackupConfig, error) {
-	file, err := os.Open(path)
+	file, err := os.Open(path) // #nosec G304 -- config path is chosen by the operator; checkConfigFileTrust vets the file
 	if err != nil {
 		return DackupConfig{}, fmt.Errorf("failed to open config file %s: %w", path, err)
 	}
 	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return DackupConfig{}, fmt.Errorf("failed to stat config file %s: %w", path, err)
+	}
+
+	if err := checkConfigFileTrust(path, info); err != nil {
+		return DackupConfig{}, err
+	}
 
 	var config DackupConfig
 	if err := json.NewDecoder(file).Decode(&config); err != nil {
@@ -68,6 +78,29 @@ func ReadDackupConfig(path string) (DackupConfig, error) {
 	}
 
 	return config, nil
+}
+
+// checkConfigFileTrust rejects a config file another user could have
+// written, since the config picks which binaries dackup executes (borg,
+// kopia and restic "bin", "rclone_exe_path") and dackup usually runs as
+// root. The file must not be writable by group or others, and must be
+// owned by the current user or root. The owner check is skipped when the
+// platform exposes no uid.
+func checkConfigFileTrust(path string, info os.FileInfo) error {
+	if perm := info.Mode().Perm(); perm&0o022 != 0 {
+		return fmt.Errorf("config file %s has permissions %o and is writable by other users; run chmod 600 %s", path, perm, path)
+	}
+
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return nil
+	}
+
+	if euid := uint32(os.Geteuid()); stat.Uid != euid && stat.Uid != 0 { // #nosec G115 -- a Unix euid is never negative and fits in uint32
+		return fmt.Errorf("config file %s is owned by uid %d, not by the current user or root", path, stat.Uid)
+	}
+
+	return nil
 }
 
 // WriteDackupConfig writes config as indented JSON to path, creating its

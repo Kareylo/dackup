@@ -9,6 +9,7 @@ package borg
 import (
 	"dackup/internal/shared"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -155,7 +156,7 @@ func (backend Backend) Backup(stagingDir string) error {
 // Restore implements the plain backend.Backend fallback, extracting the
 // latest archive from the global repository into stagingDir.
 func (backend Backend) Restore(stagingDir string) error {
-	return backend.extractRepo(stagingDir, backend.Config.GlobalRepoName)
+	return backend.extractRepo(stagingDir, backend.Config.GlobalRepoName, nil)
 }
 
 // BackupGroups archives each group into its own repository, scoped to that
@@ -193,7 +194,7 @@ func (backend Backend) RestoreGroups(stagingDir string, groups []shared.BackendG
 	}
 
 	for _, group := range groups {
-		if err := backend.extractRepo(stagingDir, group.Name); err != nil {
+		if err := backend.extractRepo(stagingDir, group.Name, group.Paths); err != nil {
 			return err
 		}
 	}
@@ -245,13 +246,19 @@ func (backend Backend) archiveRepo(stagingDir string, repoName string, relativeP
 	backend.log("INFO", fmt.Sprintf("Creating borg archive %s", archive))
 
 	if err := envRunner.RunInDirWithEnv(stagingDir, env, backend.Config.bin(), args...); err != nil {
-		return fmt.Errorf("borg create failed for %s: %w", archive, err)
+		if !isBorgWarning(err) {
+			return fmt.Errorf("borg create failed for %s: %w", archive, err)
+		}
+		backend.log("WARN", fmt.Sprintf("borg create for %s finished with warnings; see the command log for details", archive))
 	}
 
 	return nil
 }
 
-func (backend Backend) extractRepo(stagingDir string, repoName string) error {
+// extractRepo extracts the latest archive of repoName into stagingDir,
+// first clearing clearPaths (the group's configured paths) under it so the
+// result holds only what the archive has. The global restore passes nil.
+func (backend Backend) extractRepo(stagingDir string, repoName string, clearPaths []string) error {
 	repoPath := backend.repoPath(repoName)
 
 	if backend.dryRun() {
@@ -284,7 +291,11 @@ func (backend Backend) extractRepo(stagingDir string, repoName string) error {
 		return nil
 	}
 
-	if err := backend.fileSystem().MkdirAll(stagingDir, 0o755); err != nil {
+	if err := shared.ClearStagingPaths(backend.fileSystem(), stagingDir, clearPaths); err != nil {
+		return err
+	}
+
+	if err := backend.fileSystem().MkdirAll(stagingDir, shared.StagingDirMode); err != nil {
 		return fmt.Errorf("failed to create staging directory %s: %w", stagingDir, err)
 	}
 
@@ -293,7 +304,10 @@ func (backend Backend) extractRepo(stagingDir string, repoName string) error {
 	backend.log("INFO", fmt.Sprintf("Extracting borg archive %s into %s", archive, stagingDir))
 
 	if err := envRunner.RunInDirWithEnv(stagingDir, env, backend.Config.bin(), "extract", archive); err != nil {
-		return fmt.Errorf("borg extract failed for %s: %w", archive, err)
+		if !isBorgWarning(err) {
+			return fmt.Errorf("borg extract failed for %s: %w", archive, err)
+		}
+		backend.log("WARN", fmt.Sprintf("borg extract for %s finished with warnings; see the command log for details", archive))
 	}
 
 	return nil
@@ -315,6 +329,10 @@ func (backend Backend) ensureRepo(envRunner shared.EnvCommandRunner, env []strin
 
 	if err := backend.fileSystem().MkdirAll(repoPath, 0o700); err != nil {
 		return fmt.Errorf("failed to create borg repository directory %s: %w", repoPath, err)
+	}
+
+	if backend.Config.Encryption == "none" {
+		backend.log("WARN", fmt.Sprintf("Initializing borg repository %s WITHOUT encryption; backups are stored in plaintext", repoPath))
 	}
 
 	if err := envRunner.RunInDirWithEnv("", env, backend.Config.bin(), "init", "--encryption="+backend.Config.Encryption, repoPath); err != nil {
@@ -404,4 +422,14 @@ func (backend Backend) log(level string, message string) {
 	}
 
 	backend.Logger.Log(level, message)
+}
+
+// isBorgWarning reports whether err is borg exiting with code 1, which
+// borg documents as "warning (operation reached its normal end, but there
+// were warnings)", e.g. a file changed while it was read, or an extended
+// attribute the destination filesystem can't store. Code 2 and above, a
+// signal, or an error with no exit code at all stay errors.
+func isBorgWarning(err error) bool {
+	var exitErr interface{ ExitCode() int }
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == 1
 }

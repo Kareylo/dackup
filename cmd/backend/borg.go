@@ -49,6 +49,17 @@ func (service commandService) promptBorgSettings(current borg.Config) (json.RawM
 	if err != nil {
 		return nil, err
 	}
+
+	if strings.TrimSpace(encryption) == "none" && strings.TrimSpace(current.Encryption) != "none" {
+		confirmed, err := service.prompt.Bool("Store backups WITHOUT encryption? Anyone who can read the repository can read your data", false)
+		if err != nil {
+			return nil, err
+		}
+
+		if !confirmed {
+			return nil, fmt.Errorf("borg encryption %q was not confirmed; nothing was changed", encryption)
+		}
+	}
 	config.Encryption = encryption
 
 	if strings.TrimSpace(encryption) == "none" {

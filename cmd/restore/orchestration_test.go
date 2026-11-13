@@ -334,62 +334,87 @@ func TestRunRestoreWithService_StopFailureAbortsAndRestartsAlreadyStoppedContain
 	}
 }
 
-func TestRunRestoreWithService_BackendRestoreFailureLogsAndContinues(t *testing.T) {
-	fixture := newTestOrchestrationFixture(t, map[string]bool{"a": true}, nil)
-	withRestoreDirs(t, fixture.srcDir, fixture.dstDir)
-	withResolveBackend(t, func(commandService, shared.DackupConfig) (backend.Backend, error) {
-		return fakeBinaryBackend{restoreErr: fmt.Errorf("remote storage unreachable")}, nil
-	})
+// fakeGroupedRestoreBackend implements backend.GroupedBackend, so the
+// RestoreGroups branch of runRestoreWithService can be tested too.
+type fakeGroupedRestoreBackend struct {
+	restoreGroupsErr error
+}
 
-	if err := os.MkdirAll(filepath.Join(fixture.srcDir, "data"), 0o755); err != nil {
-		t.Fatalf("failed to create configured path: %v", err)
+func (fakeGroupedRestoreBackend) Name() string                                     { return "fake-grouped" }
+func (fakeGroupedRestoreBackend) Backup(stagingDir string) error                   { return nil }
+func (fakeGroupedRestoreBackend) Restore(stagingDir string) error                  { return nil }
+func (fakeGroupedRestoreBackend) BackupGroups(string, []shared.BackendGroup) error { return nil }
+func (fb fakeGroupedRestoreBackend) RestoreGroups(string, []shared.BackendGroup) error {
+	return fb.restoreGroupsErr
+}
+
+// A failed backend restore leaves staging_dir holding stale or partial
+// data, so restore must stop right there: no container is stopped and
+// rsync --delete / chown never touch the live data.
+func TestRunRestoreWithService_BackendRestoreFailureAbortsBeforeTouchingContainers(t *testing.T) {
+	cases := []struct {
+		name    string
+		backend backend.Backend
+	}{
+		{"Restore", fakeBinaryBackend{restoreErr: fmt.Errorf("remote storage unreachable")}},
+		{"RestoreGroups", fakeGroupedRestoreBackend{restoreGroupsErr: fmt.Errorf("remote storage unreachable")}},
 	}
 
-	effectiveConfigPath := filepath.Join(fixture.dstDir, "config.json")
-	touchFile(t, effectiveConfigPath)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newTestOrchestrationFixture(t, map[string]bool{"a": true}, nil)
+			withRestoreDirs(t, fixture.srcDir, fixture.dstDir)
+			withResolveBackend(t, func(commandService, shared.DackupConfig) (backend.Backend, error) {
+				return tc.backend, nil
+			})
 
-	config := shared.DackupConfig{
-		User:  "restoreuser",
-		Group: "restoregroup",
-		Containers: []shared.ContainerConfig{
-			{Container: "a", ToStop: true, Paths: []string{"data"}},
-		},
-	}
+			if err := os.MkdirAll(filepath.Join(fixture.srcDir, "data"), 0o755); err != nil {
+				t.Fatalf("failed to create configured path: %v", err)
+			}
 
-	err := runRestoreWithService(fixture.service, config, effectiveConfigPath, nil)
-	if err == nil {
-		t.Fatal("expected an error when the backend restore fails")
-	}
+			effectiveConfigPath := filepath.Join(fixture.dstDir, "config.json")
+			touchFile(t, effectiveConfigPath)
 
-	if !strings.Contains(err.Error(), "remote storage unreachable") {
-		t.Fatalf("expected error to mention the backend failure, got %q", err.Error())
-	}
+			config := shared.DackupConfig{
+				User:  "restoreuser",
+				Group: "restoregroup",
+				Containers: []shared.ContainerConfig{
+					{Container: "a", ToStop: true, Paths: []string{"data"}},
+				},
+			}
 
-	if !reflect.DeepEqual(fixture.runner.stopped, []string{"a"}) {
-		t.Fatalf("expected container a to still be stopped despite the backend failure, got %#v", fixture.runner.stopped)
-	}
+			err := runRestoreWithService(fixture.service, config, effectiveConfigPath, nil)
+			if err == nil {
+				t.Fatal("expected an error when the backend restore fails")
+			}
 
-	if !reflect.DeepEqual(fixture.runner.started, []string{"a"}) {
-		t.Fatalf("expected container a to still be restarted despite the backend failure, got %#v", fixture.runner.started)
-	}
+			if !strings.Contains(err.Error(), "remote storage unreachable") {
+				t.Fatalf("expected error to mention the backend failure, got %q", err.Error())
+			}
 
-	if !fixture.runner.ranRsync {
-		t.Fatal("expected rsync to still have been invoked despite the backend failure")
-	}
+			if len(fixture.runner.stopped) != 0 || len(fixture.runner.started) != 0 {
+				t.Fatalf("expected no container to be stopped or started, got stopped=%#v started=%#v", fixture.runner.stopped, fixture.runner.started)
+			}
 
-	if !fixture.runner.ranChown {
-		t.Fatal("expected chown to still have been invoked despite the backend failure")
-	}
+			if fixture.runner.ranRsync {
+				t.Fatal("expected rsync not to run after a failed backend restore")
+			}
 
-	foundErrorLine := false
-	for _, line := range fixture.logger.lines {
-		if strings.HasPrefix(line, "[ERROR]") && strings.Contains(line, "remote storage unreachable") {
-			foundErrorLine = true
-			break
-		}
-	}
-	if !foundErrorLine {
-		t.Fatalf("expected an [ERROR] log line mentioning the backend failure, got %#v", fixture.logger.lines)
+			if fixture.runner.ranChown {
+				t.Fatal("expected chown not to run after a failed backend restore")
+			}
+
+			foundErrorLine := false
+			for _, line := range fixture.logger.lines {
+				if strings.HasPrefix(line, "[ERROR]") && strings.Contains(line, "remote storage unreachable") {
+					foundErrorLine = true
+					break
+				}
+			}
+			if !foundErrorLine {
+				t.Fatalf("expected an [ERROR] log line mentioning the backend failure, got %#v", fixture.logger.lines)
+			}
+		})
 	}
 }
 
