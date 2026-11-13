@@ -165,6 +165,15 @@ func runRestoreWithService(
 		backendErr = err
 	}
 
+	// A failed backend restore leaves staging holding stale or partial data;
+	// transferring it would overwrite (rsync --delete) the live data with it.
+	// Unlike backup, restore therefore stops here, before any container is
+	// touched.
+	if backendErr != nil {
+		service.logger.Log("ERROR", "Backend restore failed; no container was stopped and the live data was not changed")
+		return backendErr
+	}
+
 	containersToStop := restoreContainersToStopFromConfig(configs)
 
 	lifecycleService := shared.ContainerLifecycleService{
@@ -194,11 +203,6 @@ func runRestoreWithService(
 
 	if err := lifecycleService.StartStoppedContainers(stoppedContainers, "restore"); err != nil {
 		return err
-	}
-
-	if backendErr != nil {
-		service.logger.Log("WARN", "Restore command finished with errors")
-		return backendErr
 	}
 
 	service.logger.Log("INFO", "Restore command finished successfully")

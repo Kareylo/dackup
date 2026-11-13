@@ -3,9 +3,15 @@ package restic
 import (
 	"dackup/internal/backend/restic/storage"
 	"dackup/internal/shared"
+	"errors"
 	"fmt"
 	"path/filepath"
 )
+
+// resticExitRepoDoesNotExist is restic's documented exit code for "repository
+// does not exist" (restic >= 0.17; a wrong password is 12, most other
+// failures 1).
+const resticExitRepoDoesNotExist = 10
 
 // snapshotRepo ensures the named repository exists, then creates one restic
 // snapshot covering every entry in relativePaths in a single invocation —
@@ -51,9 +57,11 @@ func (backend Backend) snapshotRepo(stagingDir string, repoName string, relative
 }
 
 // restoreRepo restores the latest snapshot from the named repository into
-// stagingDir. It never creates a repository — a restore against a
-// repository that doesn't exist (or can't be reached) is a graceful no-op,
-// not an error, since there's nothing to restore either way.
+// stagingDir. It never creates a repository. A repository restic reports
+// as missing (exit 10) is a graceful no-op, since nothing was ever backed
+// up to it; any other failure to open it (wrong password, unreachable
+// storage) is an error, so an outage is never mistaken for "nothing to
+// restore".
 func (backend Backend) restoreRepo(stagingDir string, repoName string) error {
 	if backend.dryRun() {
 		backend.log("INFO", fmt.Sprintf("[dry-run] Would restore the latest restic snapshot from repository %q into %s", repoName, stagingDir))
@@ -77,7 +85,12 @@ func (backend Backend) restoreRepo(stagingDir string, repoName string) error {
 
 	env := backend.commandEnv(passwordEnv, invocation)
 
-	if !backend.repoExists(envRunner, env, invocation) {
+	exists, err := backend.repoExists(envRunner, env, invocation)
+	if err != nil {
+		return err
+	}
+
+	if !exists {
 		backend.log("WARN", fmt.Sprintf("Restic repository %q does not exist yet; nothing to restore", repoName))
 		return nil
 	}
@@ -105,12 +118,16 @@ func (backend Backend) restoreRepo(stagingDir string, repoName string) error {
 // directories to remote object stores, so existence is checked by driving
 // the CLI itself via repoExists ("restic cat config"), restic's own
 // documented way to probe a repository without side effects (see restic's
-// "Scripting" docs) — any nonzero exit is treated as "not present yet", the
-// same broad-but-simple approach kopia's connect-then-create-fallback idiom
-// uses for its own different reason (no uniform existence check across
-// kopia's storage types either).
+// "Scripting" docs). Only exit code 10 ("repository does not exist") leads
+// to "restic init"; any other failure is returned, so a repository that
+// merely couldn't be opened is never re-initialized.
 func (backend Backend) ensureRepo(envRunner shared.EnvCommandRunner, env []string, invocation storage.Invocation) error {
-	if backend.repoExists(envRunner, env, invocation) {
+	exists, err := backend.repoExists(envRunner, env, invocation)
+	if err != nil {
+		return err
+	}
+
+	if exists {
 		return nil
 	}
 
@@ -124,11 +141,23 @@ func (backend Backend) ensureRepo(envRunner shared.EnvCommandRunner, env []strin
 	return nil
 }
 
-func (backend Backend) repoExists(envRunner shared.EnvCommandRunner, env []string, invocation storage.Invocation) bool {
+// repoExists probes the repository with "restic cat config". It reports
+// false only for restic's "repository does not exist" exit code, and an
+// error for every other failure.
+func (backend Backend) repoExists(envRunner shared.EnvCommandRunner, env []string, invocation storage.Invocation) (bool, error) {
 	args := append(append([]string{}, invocation.Args...), "cat", "config", "-r", invocation.Repository)
 
 	_, err := envRunner.OutputWithEnv(env, backend.Config.bin(), args...)
-	return err == nil
+	if err == nil {
+		return true, nil
+	}
+
+	var exitErr interface{ ExitCode() int }
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == resticExitRepoDoesNotExist {
+		return false, nil
+	}
+
+	return false, fmt.Errorf("failed to open restic repository %s: %w", invocation.Repository, err)
 }
 
 // repositoryInvocation resolves Config's active storage type into its

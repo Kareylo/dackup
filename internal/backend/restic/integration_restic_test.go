@@ -135,3 +135,28 @@ func TestIntegration_Restic_RestoreFromUninitializedRepoIsGracefulNoOp(t *testin
 		t.Fatalf("Restore returned error: %v", err)
 	}
 }
+
+// TestIntegration_Restic_RestoreWithWrongPasswordFails checks against the
+// real CLI that a repository restic cannot open (here: wrong password,
+// exit 12) fails the restore instead of being reported as "nothing to
+// restore".
+func TestIntegration_Restic_RestoreWithWrongPasswordFails(t *testing.T) {
+	RequireResticBinary(t)
+
+	backend := newLocalIntegrationBackend(t)
+
+	stagingDir, _, _ := WriteIntegrationTestFile(t)
+	if err := backend.Backup(stagingDir); err != nil {
+		t.Fatalf("Backup returned error: %v", err)
+	}
+
+	wrongPassword, err := backend.Secrets.Encrypt("not-the-repository-password")
+	if err != nil {
+		t.Fatalf("failed to encrypt wrong password: %v", err)
+	}
+	backend.Config.EncryptedPassword = wrongPassword
+
+	if err := backend.Restore(t.TempDir()); err == nil {
+		t.Fatal("expected Restore with the wrong password to return an error")
+	}
+}

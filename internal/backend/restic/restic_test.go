@@ -64,6 +64,16 @@ func (r *fakeEnvRunner) OutputWithEnv(env []string, name string, args ...string)
 	return nil, nil
 }
 
+// exitCodeError stands in for the *exec.ExitError a real restic run
+// returns, carrying only the exit code restic's "cat config" probe is
+// classified by (10: repository does not exist, 12: wrong password).
+type exitCodeError struct {
+	code int
+}
+
+func (e exitCodeError) Error() string { return fmt.Sprintf("exit status %d", e.code) }
+func (e exitCodeError) ExitCode() int { return e.code }
+
 // runnerWithoutEnvSupport implements shared.CommandRunner but not
 // shared.EnvCommandRunner, for testing the capability-missing error path.
 type runnerWithoutEnvSupport struct{}
@@ -250,7 +260,7 @@ func TestBackend_Backup_DryRunMakesNoCalls(t *testing.T) {
 
 func TestBackend_Backup_InitializesRepoThenBacksUp(t *testing.T) {
 	runner := &fakeEnvRunner{
-		outErrs: map[string]error{"cat config -r /repos/global": fmt.Errorf("repository does not exist")},
+		outErrs: map[string]error{"cat config -r /repos/global": exitCodeError{code: 10}},
 	}
 	backend := testBackend(runner, &fakeFileSystem{}, &fakeLogger{})
 
@@ -356,7 +366,7 @@ func TestBackend_Restore_DryRunMakesNoCalls(t *testing.T) {
 
 func TestBackend_Restore_RepoNotInitializedIsGracefulNoOp(t *testing.T) {
 	runner := &fakeEnvRunner{
-		outErrs: map[string]error{"cat config -r /repos/global": fmt.Errorf("repository does not exist")},
+		outErrs: map[string]error{"cat config -r /repos/global": exitCodeError{code: 10}},
 	}
 	logger := &fakeLogger{}
 	backend := testBackend(runner, &fakeFileSystem{}, logger)
@@ -371,6 +381,65 @@ func TestBackend_Restore_RepoNotInitializedIsGracefulNoOp(t *testing.T) {
 
 	if !hasMessageContaining(logger.messages, "does not exist yet") {
 		t.Fatalf("expected a log message about the missing repo, got %v", logger.messages)
+	}
+}
+
+// A failed "cat config" probe is only "nothing to restore" when restic
+// says the repository does not exist (exit 10). A wrong password, an
+// unreachable backend, or an error without an exit code must fail the
+// restore, so dackup never treats an outage as an empty repository.
+func TestBackend_Restore_ProbeFailureOtherThanMissingRepoReturnsError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{"wrong password", exitCodeError{code: 12}},
+		{"unreachable backend", exitCodeError{code: 1}},
+		{"no exit code", fmt.Errorf("context deadline exceeded")},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &fakeEnvRunner{
+				outErrs: map[string]error{"cat config -r /repos/global": tc.err},
+			}
+			logger := &fakeLogger{}
+			backend := testBackend(runner, &fakeFileSystem{}, logger)
+
+			err := backend.Restore("/staging")
+			if err == nil {
+				t.Fatal("expected Restore to return an error")
+			}
+
+			if !strings.Contains(err.Error(), "/repos/global") {
+				t.Fatalf("expected the error to name the repository, got %v", err)
+			}
+
+			if len(runner.calls) != 1 {
+				t.Fatalf("expected only the cat config probe call, got %+v", runner.calls)
+			}
+
+			if hasMessageContaining(logger.messages, "nothing to restore") {
+				t.Fatalf("expected no \"nothing to restore\" message, got %v", logger.messages)
+			}
+		})
+	}
+}
+
+// Backup must not try "restic init" on a repository it merely failed to
+// open: only a confirmed "does not exist" (exit 10) leads to init.
+func TestBackend_Backup_ProbeFailureOtherThanMissingRepoReturnsErrorWithoutInit(t *testing.T) {
+	runner := &fakeEnvRunner{
+		outErrs: map[string]error{"cat config -r /repos/global": exitCodeError{code: 12}},
+	}
+	backend := testBackend(runner, &fakeFileSystem{}, &fakeLogger{})
+
+	if err := backend.Backup("/staging"); err == nil {
+		t.Fatal("expected Backup to return an error")
+	}
+
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected only the cat config probe call (no init, no backup), got %+v", runner.calls)
 	}
 }
 
