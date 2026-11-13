@@ -193,6 +193,20 @@ Example configuration:
 | `paths` | Paths to back up and restore, relative to the configured source/destination roots. Absolute-looking paths are cleaned and treated relative to those roots. |
 | `contains` | Dependent containers to include automatically when this container is selected. |
 
+### Secret key
+
+Every `encrypted_*` value in `backend_settings` (borg passphrases, kopia/restic repository passwords, storage keys, SFTP/WebDAV/REST/Swift passwords) is encrypted with AES-256-GCM using a key stored at:
+
+```text
+~/.config/dackup/secret.key
+```
+
+`~` is the home directory of the user running dackup. The key is created with mode `0600` the first time a secret is encrypted, and dackup refuses to use it if group or other users can access it.
+
+What it protects against: secrets leaking through a copied, shared or committed config file. What it does not protect against: anyone who can read that user's home directory, since the key sits next to the config it decrypts.
+
+**Back up `secret.key` separately.** Without it, dackup cannot decrypt the repository password, so restoring on a new machine is impossible even with an intact backup. Keep a copy (or the plaintext passwords themselves) in a password manager or another offline location, not in `staging_dir`, `backend_dir` or the backup target. If the key is lost but you still know the passwords, run `dackup backend update` to re-enter them; a new key is created automatically.
+
 ## Backup
 
 Default backup paths:
