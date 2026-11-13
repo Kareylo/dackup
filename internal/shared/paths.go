@@ -55,11 +55,20 @@ func ValidateConfiguredPath(configuredPath string) error {
 // backend restore into stagingDir starts from empty targets: borg extract
 // and restic restore never delete files the archive doesn't have, and the
 // transfer step would otherwise push those leftovers into the live data.
-// A path that cleans to the staging root itself is skipped, never removed.
+// Every path is first checked with ValidateConfiguredPath, so one that
+// escapes stagingDir makes the call fail before anything is deleted,
+// without relying on callers having run PreflightChecks. A path that
+// cleans to the staging root itself is skipped, never removed.
 func ClearStagingPaths(fs FileSystem, stagingDir string, relativePaths []string) error {
 	for _, relativePath := range relativePaths {
+		if err := ValidateConfiguredPath(relativePath); err != nil {
+			return fmt.Errorf("refusing to clear staging paths: %w", err)
+		}
+	}
+
+	for _, relativePath := range relativePaths {
 		cleanPath := CleanConfiguredPath(relativePath)
-		if cleanPath == "" || cleanPath == "." {
+		if cleanPath == "" {
 			continue
 		}
 
