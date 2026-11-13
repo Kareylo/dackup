@@ -3,6 +3,7 @@ package backend
 import (
 	"dackup/internal/backend/restic"
 	"dackup/internal/backend/restic/storage/filesystem"
+	"dackup/internal/backend/restic/storage/rest"
 	"dackup/internal/backend/restic/storage/s3"
 	"dackup/internal/backend/restic/storage/sftp"
 	"dackup/internal/shared"
@@ -328,6 +329,70 @@ func TestPromptResticRestSettings_GathersCredentialsWhenUsernameGiven(t *testing
 	}
 	if decrypted != "hunter2" {
 		t.Fatalf("expected decrypted password %q, got %q", "hunter2", decrypted)
+	}
+}
+
+func TestPromptResticRestSettings_PlainHTTPWithCredentialsAsksForOptIn(t *testing.T) {
+	// url, username, password, allow insecure http -> y
+	service := newTestServiceWithSecretKey(t, "http://backup.example.com:8000\ndackup\nhunter2\ny\n")
+
+	got, err := service.promptResticRestSettings(nil)
+	if err != nil {
+		t.Fatalf("promptResticRestSettings returned error: %v", err)
+	}
+
+	if !got.AllowInsecureHTTP {
+		t.Fatalf("expected allow_insecure_http to be set after opting in, got %#v", got)
+	}
+	if err := got.Validate(); err != nil {
+		t.Fatalf("expected the opted-in settings to validate, got: %v", err)
+	}
+}
+
+func TestPromptResticRestSettings_PlainHTTPWithCredentialsDefaultsToNoOptIn(t *testing.T) {
+	// url, username, password, allow insecure http -> (default: no)
+	service := newTestServiceWithSecretKey(t, "http://backup.example.com:8000\ndackup\nhunter2\n\n")
+
+	got, err := service.promptResticRestSettings(nil)
+	if err != nil {
+		t.Fatalf("promptResticRestSettings returned error: %v", err)
+	}
+
+	if got.AllowInsecureHTTP {
+		t.Fatalf("expected allow_insecure_http to stay false by default, got %#v", got)
+	}
+	if err := got.Validate(); err == nil {
+		t.Fatal("expected the resulting settings to fail validation without the opt-in")
+	}
+}
+
+func TestPromptResticRestSettings_HTTPSClearsInsecureOptIn(t *testing.T) {
+	// https URL with credentials: no opt-in question is asked.
+	service := newTestServiceWithSecretKey(t, "https://backup.example.com:8000\ndackup\nhunter2\n")
+
+	current := &rest.Storage{URL: "http://backup.example.com:8000", AllowInsecureHTTP: true}
+	got, err := service.promptResticRestSettings(current)
+	if err != nil {
+		t.Fatalf("promptResticRestSettings returned error: %v", err)
+	}
+
+	if got.AllowInsecureHTTP {
+		t.Fatalf("expected allow_insecure_http to be cleared for an https URL, got %#v", got)
+	}
+}
+
+func TestPromptResticRestSettings_UnauthenticatedHTTPSkipsOptIn(t *testing.T) {
+	// http URL without a username: no password and no opt-in question.
+	service := newTestServiceWithSecretKey(t, "http://localhost:8010\n\n")
+
+	current := &rest.Storage{URL: "http://localhost:8010", AllowInsecureHTTP: true}
+	got, err := service.promptResticRestSettings(current)
+	if err != nil {
+		t.Fatalf("promptResticRestSettings returned error: %v", err)
+	}
+
+	if got.AllowInsecureHTTP {
+		t.Fatalf("expected allow_insecure_http to be cleared when no credentials are sent, got %#v", got)
 	}
 }
 

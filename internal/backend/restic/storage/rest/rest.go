@@ -33,6 +33,11 @@ type Storage struct {
 	// embedded in the repository URL, avoiding the argv exposure a
 	// credential-in-URL approach would have.
 	EncryptedPassword string `json:"encrypted_password,omitempty"`
+
+	// AllowInsecureHTTP opts in to sending Username/EncryptedPassword over
+	// a non-https URL, where Basic auth travels in cleartext. Validate
+	// rejects that combination unless this is set.
+	AllowInsecureHTTP bool `json:"allow_insecure_http,omitempty"`
 }
 
 // Validate reports whether the REST settings are well-formed.
@@ -48,7 +53,20 @@ func (s Storage) Validate() error {
 		return fmt.Errorf("restic rest storage requires username and encrypted_password to be set together")
 	}
 
+	if s.SendsCredentialsInCleartext() && !s.AllowInsecureHTTP {
+		return fmt.Errorf("restic rest storage would send credentials in cleartext over %q; use https:// or set allow_insecure_http", s.URL)
+	}
+
 	return nil
+}
+
+// SendsCredentialsInCleartext reports whether a username is configured for
+// a URL that isn't https://, i.e. Basic auth would go out unencrypted.
+func (s Storage) SendsCredentialsInCleartext() bool {
+	if strings.TrimSpace(s.Username) == "" {
+		return false
+	}
+	return !strings.HasPrefix(strings.ToLower(strings.TrimSpace(s.URL)), "https://")
 }
 
 // BuildInvocation implements storage.Provider.

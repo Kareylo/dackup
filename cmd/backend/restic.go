@@ -444,6 +444,16 @@ func (service commandService) promptResticRestSettings(current *rest.Storage) (r
 		config.EncryptedPassword = encryptedPassword
 	}
 
+	if config.SendsCredentialsInCleartext() {
+		allowInsecureHTTP, err := service.prompt.Bool("The REST URL is not https://, so the password would be sent in cleartext. Allow it anyway?", config.AllowInsecureHTTP)
+		if err != nil {
+			return rest.Storage{}, err
+		}
+		config.AllowInsecureHTTP = allowInsecureHTTP
+	} else {
+		config.AllowInsecureHTTP = false
+	}
+
 	return config, nil
 }
 
