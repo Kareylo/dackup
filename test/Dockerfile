@@ -58,14 +58,24 @@ RUN apt-get update \
     && rm -f /tmp/restic \
     && rm -rf /var/lib/apt/lists/*
 
+# The suite runs as an unprivileged user, not root: none of the tests need
+# root (dackup's integration runs never chown), and a test that only
+# passes as root would hide a real permission bug. GOPATH (/go) is 1777 in
+# the official golang image, so the module cache below is created by this
+# user; /src is created up front because WORKDIR would make it root-owned,
+# and the suite writes coverage.out and build/ into it.
+RUN useradd --create-home --uid 1000 tester \
+    && install -d -o tester -g tester /src
+
 WORKDIR /src
+USER tester
 
 # Layer the module cache separately from the rest of the source so editing
 # application code doesn't invalidate `go mod download`'s layer.
-COPY go.mod go.sum ./
+COPY --chown=tester:tester go.mod go.sum ./
 RUN go mod download
 
-COPY . .
+COPY --chown=tester:tester . .
 
 # Fails the image build fast on a compile error, before any container ever
 # starts and burns time waiting on the emulator services in compose.yml.
