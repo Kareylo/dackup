@@ -317,6 +317,10 @@ func (backend Backend) ensureRepo(envRunner shared.EnvCommandRunner, env []strin
 		return fmt.Errorf("failed to create borg repository directory %s: %w", repoPath, err)
 	}
 
+	if backend.Config.Encryption == "none" {
+		backend.log("WARN", fmt.Sprintf("Initializing borg repository %s WITHOUT encryption; backups are stored in plaintext", repoPath))
+	}
+
 	if err := envRunner.RunInDirWithEnv("", env, backend.Config.bin(), "init", "--encryption="+backend.Config.Encryption, repoPath); err != nil {
 		return fmt.Errorf("failed to initialize borg repository %s: %w", repoPath, err)
 	}

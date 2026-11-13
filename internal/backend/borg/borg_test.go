@@ -541,3 +541,101 @@ func hasMessageContaining(messages []string, substr string) bool {
 	}
 	return false
 }
+
+// --- Unencrypted repository warning ---
+
+// unencryptedWarnings returns the WARN lines about a repository being
+// initialized without encryption.
+func unencryptedWarnings(logger *fakeLogger) []string {
+	var warnings []string
+	for _, message := range logger.messages {
+		if strings.HasPrefix(message, "WARN: ") && strings.Contains(message, "WITHOUT encryption") {
+			warnings = append(warnings, message)
+		}
+	}
+
+	return warnings
+}
+
+func TestBackend_Backup_InitWithNoneEncryptionWarns(t *testing.T) {
+	runner := &fakeEnvRunner{}
+	logger := &fakeLogger{}
+	backend := testBackend(runner, newFakeFileSystem(), logger)
+	backend.Config.Encryption = "none"
+
+	if err := backend.Backup("/staging"); err != nil {
+		t.Fatalf("Backup returned error: %v", err)
+	}
+
+	warnings := unencryptedWarnings(logger)
+	if len(warnings) != 1 {
+		t.Fatalf("expected one unencrypted-repository warning, got %d: %v", len(warnings), logger.messages)
+	}
+
+	if !strings.Contains(warnings[0], "/repos/global") {
+		t.Fatalf("expected the warning to name the repository path, got: %s", warnings[0])
+	}
+
+	if runner.calls[0].args[0] != "init" || runner.calls[0].args[1] != "--encryption=none" {
+		t.Fatalf("expected the repository to still be initialized with --encryption=none, got %+v", runner.calls[0])
+	}
+}
+
+func TestBackend_Backup_InitWithEncryptionDoesNotWarn(t *testing.T) {
+	logger := &fakeLogger{}
+	backend := testBackend(&fakeEnvRunner{}, newFakeFileSystem(), logger)
+	backend.Config.EncryptedPassphrase = "enc:hunter2"
+
+	if err := backend.Backup("/staging"); err != nil {
+		t.Fatalf("Backup returned error: %v", err)
+	}
+
+	if warnings := unencryptedWarnings(logger); len(warnings) != 0 {
+		t.Fatalf("expected no unencrypted-repository warning for repokey, got: %v", warnings)
+	}
+}
+
+func TestBackend_Backup_ExistingNoneRepoDoesNotWarnAgain(t *testing.T) {
+	logger := &fakeLogger{}
+	backend := testBackend(&fakeEnvRunner{}, newFakeFileSystem("/repos/global/config"), logger)
+	backend.Config.Encryption = "none"
+
+	if err := backend.Backup("/staging"); err != nil {
+		t.Fatalf("Backup returned error: %v", err)
+	}
+
+	if warnings := unencryptedWarnings(logger); len(warnings) != 0 {
+		t.Fatalf("expected no warning when the repository already exists, got: %v", warnings)
+	}
+}
+
+func TestBackend_BackupGroups_WarnsForEachNewUnencryptedRepo(t *testing.T) {
+	logger := &fakeLogger{}
+	backend := testBackend(&fakeEnvRunner{}, newFakeFileSystem("/repos/db/config"), logger)
+	backend.Config.Encryption = "none"
+
+	groups := []shared.BackendGroup{
+		{Name: "app", Paths: []string{"app"}},
+		{Name: "db", Paths: []string{"db"}},
+	}
+
+	if err := backend.BackupGroups("/staging", groups); err != nil {
+		t.Fatalf("BackupGroups returned error: %v", err)
+	}
+
+	// app and global are new; db already exists.
+	warnings := unencryptedWarnings(logger)
+	if len(warnings) != 2 {
+		t.Fatalf("expected two warnings (app, global), got %d: %v", len(warnings), warnings)
+	}
+
+	joined := strings.Join(warnings, "\n")
+	for _, want := range []string{"/repos/app", "/repos/global"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected a warning for %s, got: %v", want, warnings)
+		}
+	}
+	if strings.Contains(joined, "/repos/db") {
+		t.Fatalf("expected no warning for the existing db repository, got: %v", warnings)
+	}
+}

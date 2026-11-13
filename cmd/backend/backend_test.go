@@ -39,8 +39,9 @@ func newTestServiceWithSecretKey(t *testing.T, input string) commandService {
 
 func TestConfigureBackend_ConfiguresBorg(t *testing.T) {
 	// name -> borg, backend_dir -> /mnt/backup/borg-repos, bin -> (empty),
-	// global_repo_name -> (default), encryption -> none, compression -> (empty)
-	service := newTestServiceWithSecretKey(t, "borg\n/mnt/backup/borg-repos\n\n\nnone\n\n")
+	// global_repo_name -> (default), encryption -> none, confirm no
+	// encryption -> y, compression -> (empty)
+	service := newTestServiceWithSecretKey(t, "borg\n/mnt/backup/borg-repos\n\n\nnone\ny\n\n")
 
 	config, configured, err := service.configureBackend(shared.DackupConfig{User: "test-user"})
 	if err != nil {
@@ -67,8 +68,9 @@ func TestConfigureBackend_ConfiguresBorg(t *testing.T) {
 func TestConfigureBackend_UpdatePrefillsExistingBackendDir(t *testing.T) {
 	// name -> borg, backend_dir -> (kept via empty input, pre-filled from
 	// current), bin -> (empty), global_repo_name -> (default),
-	// encryption -> none, compression -> (empty)
-	service := newTestServiceWithSecretKey(t, "borg\n\n\n\nnone\n\n")
+	// encryption -> none, confirm no encryption -> y, compression ->
+	// (empty)
+	service := newTestServiceWithSecretKey(t, "borg\n\n\n\nnone\ny\n\n")
 
 	config, configured, err := service.configureBackend(shared.DackupConfig{
 		User:       "test-user",
@@ -328,8 +330,8 @@ func TestPromptBorgSettings_SwitchingToNoneEncryptionClearsPassphrase(t *testing
 	current.EncryptedPassphrase = "v1:existing-ciphertext"
 
 	// bin -> (empty), global_repo_name -> (kept), encryption -> none,
-	// compression -> (empty)
-	service := newTestServiceWithSecretKey(t, "\n\nnone\n\n")
+	// confirm no encryption -> y, compression -> (empty)
+	service := newTestServiceWithSecretKey(t, "\n\nnone\ny\n\n")
 
 	got, err := service.promptBorgSettings(current)
 	if err != nil {
@@ -346,10 +348,62 @@ func TestPromptBorgSettings_SwitchingToNoneEncryptionClearsPassphrase(t *testing
 	}
 }
 
+func TestPromptBorgSettings_SwitchingToNoneRequiresConfirmation(t *testing.T) {
+	cases := []struct {
+		name   string
+		answer string
+	}{
+		{"default answer", ""},
+		{"explicit no", "n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// bin -> (empty), global_repo_name -> (default), encryption ->
+			// none, confirm no encryption -> answer
+			service := newTestServiceWithSecretKey(t, "\n\nnone\n"+tc.answer+"\n")
+
+			_, err := service.promptBorgSettings(borg.DefaultConfig())
+			if err == nil {
+				t.Fatal("expected an error when unencrypted backups are not confirmed")
+			}
+
+			if !strings.Contains(err.Error(), "none") {
+				t.Fatalf("expected the error to mention encryption %q, got: %v", "none", err)
+			}
+		})
+	}
+}
+
+func TestPromptBorgSettings_KeepingNoneDoesNotAskAgain(t *testing.T) {
+	current := borg.DefaultConfig()
+	current.Encryption = "none"
+	current.EncryptedPassphrase = ""
+
+	// bin -> (empty), global_repo_name -> (kept), encryption -> none
+	// (unchanged, so no confirmation), compression -> zstd,6. If a
+	// confirmation were asked, it would consume "zstd,6".
+	service := newTestServiceWithSecretKey(t, "\n\nnone\nzstd,6\n")
+
+	got, err := service.promptBorgSettings(current)
+	if err != nil {
+		t.Fatalf("promptBorgSettings returned error: %v", err)
+	}
+
+	var settings map[string]any
+	if err := json.Unmarshal(got, &settings); err != nil {
+		t.Fatalf("failed to unmarshal settings: %v", err)
+	}
+
+	if settings["encryption"] != "none" || settings["compression"] != "zstd,6" {
+		t.Fatalf("expected encryption none and compression zstd,6, got %v", settings)
+	}
+}
+
 func TestPromptBorgSettings_EncryptionModeAcceptsListedNumber(t *testing.T) {
 	// bin -> (empty), global_repo_name -> (default), encryption -> 1 (none),
-	// compression -> (empty)
-	service := newTestServiceWithSecretKey(t, "\n\n1\n\n")
+	// confirm no encryption -> y, compression -> (empty)
+	service := newTestServiceWithSecretKey(t, "\n\n1\ny\n\n")
 
 	got, err := service.promptBorgSettings(borg.DefaultConfig())
 	if err != nil {
@@ -368,8 +422,9 @@ func TestPromptBorgSettings_EncryptionModeAcceptsListedNumber(t *testing.T) {
 
 func TestPromptBorgSettings_RejectsUnlistedEncryptionMode(t *testing.T) {
 	// bin -> (empty), global_repo_name -> (default), encryption -> bogus
-	// (rejected) then none, compression -> (empty)
-	service := newTestServiceWithSecretKey(t, "\n\nbogus\nnone\n\n")
+	// (rejected) then none, confirm no encryption -> y, compression ->
+	// (empty)
+	service := newTestServiceWithSecretKey(t, "\n\nbogus\nnone\ny\n\n")
 
 	got, err := service.promptBorgSettings(borg.DefaultConfig())
 	if err != nil {
@@ -1052,8 +1107,8 @@ func TestPromptBackendSettings_InvalidCurrentBorgSettingsFallBackToDefaults(t *t
 	current := json.RawMessage(`{invalid-json`)
 
 	// bin -> (empty), global_repo_name -> (default), encryption -> none,
-	// compression -> (empty).
-	service := newTestServiceWithSecretKey(t, "\n\nnone\n\n")
+	// confirm no encryption -> y, compression -> (empty).
+	service := newTestServiceWithSecretKey(t, "\n\nnone\ny\n\n")
 
 	got, err := service.promptBackendSettings(borg.Name, borg.Name, current)
 	if err != nil {
