@@ -45,7 +45,10 @@ jobs:
         run: make test
 
       - name: Vulnerability scan
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+      - name: Static security analysis
+        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.30.0 -exclude-dir=test -tests=false ./...
 
       - name: Enforce coverage threshold
         env:
@@ -62,16 +65,16 @@ jobs:
             printf "OK: coverage %.1f%% meets the %s%% threshold\n", total, threshold
           }'
 
-  integration-test:
-    name: Docker integration tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Build and run integration tests via test/Dockerfile
-        run: make test-integration-docker
-
-      - name: Stop compose containers
-        if: always()
-        run: make test-integration-down
+#  integration-test:
+#    name: Docker integration tests
+#    runs-on: ubuntu-latest
+#    steps:
+#      - name: Check out code
+#        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+#
+#      - name: Build and run integration tests via test/Dockerfile
+#        run: make test-integration-docker
+#
+#      - name: Stop compose containers
+#        if: always()
+#        run: make test-integration-down

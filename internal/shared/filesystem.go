@@ -23,5 +23,5 @@ func (OSFileSystem) MkdirAll(path string, perm os.FileMode) error {
 }
 
 func (OSFileSystem) OpenFile(name string, flag int, perm os.FileMode) (*os.File, error) {
-	return os.OpenFile(name, flag, perm)
+	return os.OpenFile(name, flag, perm) // #nosec G304 -- thin os wrapper; callers pass operator-chosen paths
 }

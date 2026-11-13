@@ -97,7 +97,7 @@ func (backend Backend) RestoreGroups(stagingDir string, groups []shared.BackendG
 
 // sftpPasswordWarning is logged once per Backup/Restore/BackupGroups/
 // RestoreGroups call when kopia sftp password auth is configured.
-const sftpPasswordWarning = "kopia sftp storage uses password auth: kopia only accepts the SFTP password as --sftp-password, so any local user can read it in the process list while kopia runs. Set keyfile_path to use an SSH key instead."
+const sftpPasswordWarning = "kopia sftp storage uses password auth: kopia only accepts the SFTP password as --sftp-password, so any local user can read it in the process list while kopia runs. Set keyfile_path to use an SSH key instead." // #nosec G101 -- warning text, not a credential
 
 // warnSFTPPasswordExposure logs sftpPasswordWarning when the selected
 // storage type is sftp with password auth. It runs once per public call,

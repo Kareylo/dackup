@@ -288,7 +288,7 @@ func splitEndpointScheme(endpoint string) (string, *bool) {
 // chosen: kopia only accepts that password as --sftp-password (no env var,
 // and it disables kingpin's @file argument expansion), so it's visible in
 // the process list while kopia runs.
-const kopiaSFTPPasswordWarning = "WARNING: kopia only accepts the SFTP password on its command line, so any local user can read it (e.g. via ps) while kopia runs. Prefer an SSH key file."
+const kopiaSFTPPasswordWarning = "WARNING: kopia only accepts the SFTP password on its command line, so any local user can read it (e.g. via ps) while kopia runs. Prefer an SSH key file." // #nosec G101 -- warning text, not a credential
 
 // promptKopiaSFTPSettings gathers sftp.Storage's fields. Auth is
 // mutually exclusive (see sftp.Storage.Validate): a keyfile path is

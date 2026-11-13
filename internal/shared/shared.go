@@ -57,7 +57,7 @@ func DefaultDackupConfigPath() (string, error) {
 
 // ReadDackupConfig reads and parses the DackupConfig JSON file at path.
 func ReadDackupConfig(path string) (DackupConfig, error) {
-	file, err := os.Open(path)
+	file, err := os.Open(path) // #nosec G304 -- config path is chosen by the operator; checkConfigFileTrust vets the file
 	if err != nil {
 		return DackupConfig{}, fmt.Errorf("failed to open config file %s: %w", path, err)
 	}
@@ -96,7 +96,7 @@ func checkConfigFileTrust(path string, info os.FileInfo) error {
 		return nil
 	}
 
-	if euid := uint32(os.Geteuid()); stat.Uid != euid && stat.Uid != 0 {
+	if euid := uint32(os.Geteuid()); stat.Uid != euid && stat.Uid != 0 { // #nosec G115 -- a Unix euid is never negative and fits in uint32
 		return fmt.Errorf("config file %s is owned by uid %d, not by the current user or root", path, stat.Uid)
 	}
 
