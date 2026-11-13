@@ -76,6 +76,14 @@ func (s Storage) port() int {
 	return DefaultPort
 }
 
+// UsesPasswordAuth reports whether BuildInvocation will pass the password
+// as --sftp-password, i.e. a password is set and no keyfile overrides it.
+// Kopia binds no env var to that flag, so the password is then visible in
+// the process list while kopia runs.
+func (s Storage) UsesPasswordAuth() bool {
+	return strings.TrimSpace(s.KeyfilePath) == "" && strings.TrimSpace(s.EncryptedPassword) != ""
+}
+
 // BuildInvocation implements storage.Provider.
 func (s Storage) BuildInvocation(repoName string, secrets shared.SecretStore) (storage.Invocation, error) {
 	args := []string{

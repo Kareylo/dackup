@@ -110,3 +110,25 @@ func TestStorage_BuildInvocationWithPassword(t *testing.T) {
 		t.Fatalf("expected args %v, got %v", wantArgs, invocation.Args)
 	}
 }
+
+func TestStorage_UsesPasswordAuth(t *testing.T) {
+	cases := []struct {
+		name    string
+		storage Storage
+		want    bool
+	}{
+		{"password only", Storage{EncryptedPassword: "enc:hunter2"}, true},
+		{"keyfile only", Storage{KeyfilePath: "/home/dackup/.ssh/id_ed25519"}, false},
+		{"keyfile wins over a leftover password", Storage{KeyfilePath: "/home/dackup/.ssh/id_ed25519", EncryptedPassword: "enc:hunter2"}, false},
+		{"neither set", Storage{}, false},
+		{"whitespace-only password", Storage{EncryptedPassword: "   "}, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.storage.UsesPasswordAuth(); got != tc.want {
+				t.Fatalf("UsesPasswordAuth() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
