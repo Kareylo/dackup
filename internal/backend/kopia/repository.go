@@ -111,7 +111,7 @@ func (backend Backend) restoreRepo(stagingDir string, repoName string, relativeP
 			continue
 		}
 
-		if err := backend.fileSystem().MkdirAll(target, 0o755); err != nil {
+		if err := backend.fileSystem().MkdirAll(target, shared.StagingDirMode); err != nil {
 			return fmt.Errorf("failed to create restore target %s: %w", target, err)
 		}
 

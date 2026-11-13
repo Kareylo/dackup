@@ -74,12 +74,15 @@ func (runnerWithoutEnvSupport) LookPath(file string) (string, error)            
 
 type fakeFileSystem struct {
 	mkdirs []string
+	// mkdirPerms[i] is the perm passed with mkdirs[i].
+	mkdirPerms []os.FileMode
 }
 
 func (fs *fakeFileSystem) Stat(name string) (os.FileInfo, error) { return nil, os.ErrNotExist }
 
 func (fs *fakeFileSystem) MkdirAll(path string, perm os.FileMode) error {
 	fs.mkdirs = append(fs.mkdirs, path)
+	fs.mkdirPerms = append(fs.mkdirPerms, perm)
 	return nil
 }
 
@@ -594,4 +597,43 @@ func hasMessageContaining(messages []string, substr string) bool {
 		}
 	}
 	return false
+}
+
+// mkdirPerm returns the perm the last MkdirAll call for path used, and
+// whether there was one.
+func (fs *fakeFileSystem) mkdirPerm(path string) (os.FileMode, bool) {
+	for i := len(fs.mkdirs) - 1; i >= 0; i-- {
+		if fs.mkdirs[i] == path {
+			return fs.mkdirPerms[i], true
+		}
+	}
+
+	return 0, false
+}
+
+// assertMkdirPerm fails t unless path was created with want.
+func assertMkdirPerm(t *testing.T, fs *fakeFileSystem, path string, want os.FileMode) {
+	t.Helper()
+
+	got, ok := fs.mkdirPerm(path)
+	if !ok {
+		t.Fatalf("expected MkdirAll(%s), got calls for %v", path, fs.mkdirs)
+	}
+
+	if got != want {
+		t.Fatalf("expected %s to be created with mode %#o, got %#o", path, want, got)
+	}
+}
+
+// --- Staging directory permissions ---
+
+func TestBackend_Restore_CreatesStagingDirWithStagingDirMode(t *testing.T) {
+	fs := &fakeFileSystem{}
+	backend := testBackend(&fakeEnvRunner{}, fs, &fakeLogger{})
+
+	if err := backend.Restore("/staging"); err != nil {
+		t.Fatalf("Restore returned error: %v", err)
+	}
+
+	assertMkdirPerm(t, fs, "/staging", shared.StagingDirMode)
 }

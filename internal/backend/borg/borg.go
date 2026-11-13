@@ -284,7 +284,7 @@ func (backend Backend) extractRepo(stagingDir string, repoName string) error {
 		return nil
 	}
 
-	if err := backend.fileSystem().MkdirAll(stagingDir, 0o755); err != nil {
+	if err := backend.fileSystem().MkdirAll(stagingDir, shared.StagingDirMode); err != nil {
 		return fmt.Errorf("failed to create staging directory %s: %w", stagingDir, err)
 	}
 

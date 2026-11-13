@@ -360,6 +360,7 @@ go build -o build/dackup .
 - Make sure Docker container names match the names in your configuration.
 - Use `--dry-run` before running a backup or restore for the first time.
 - Restore uses `rsync -a --delete`, so destination files not present in the backup source can be removed.
+- `staging_dir` holds a plaintext copy of your application data and is not cleaned up after a run. Directories dackup creates under it get mode `0750`, but the staging root itself should be owned by the configured `user`/`group` with mode `0750` or stricter (e.g. `chmod 750 /backups/in`). Staging directories created by older dackup versions keep their `0755` mode until you change it.
 
 # TODO
 Here is a list of todo things that should be implemented :

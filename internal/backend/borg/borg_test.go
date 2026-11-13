@@ -63,6 +63,8 @@ func (runnerWithoutEnvSupport) LookPath(file string) (string, error)            
 type fakeFileSystem struct {
 	existing map[string]bool
 	mkdirs   []string
+	// mkdirPerms[i] is the perm passed with mkdirs[i].
+	mkdirPerms []os.FileMode
 }
 
 func newFakeFileSystem(existing ...string) *fakeFileSystem {
@@ -82,6 +84,7 @@ func (fs *fakeFileSystem) Stat(name string) (os.FileInfo, error) {
 
 func (fs *fakeFileSystem) MkdirAll(path string, perm os.FileMode) error {
 	fs.mkdirs = append(fs.mkdirs, path)
+	fs.mkdirPerms = append(fs.mkdirPerms, perm)
 	fs.existing[path] = true
 	return nil
 }
@@ -638,4 +641,61 @@ func TestBackend_BackupGroups_WarnsForEachNewUnencryptedRepo(t *testing.T) {
 	if strings.Contains(joined, "/repos/db") {
 		t.Fatalf("expected no warning for the existing db repository, got: %v", warnings)
 	}
+}
+
+// mkdirPerm returns the perm the last MkdirAll call for path used, and
+// whether there was one.
+func (fs *fakeFileSystem) mkdirPerm(path string) (os.FileMode, bool) {
+	for i := len(fs.mkdirs) - 1; i >= 0; i-- {
+		if fs.mkdirs[i] == path {
+			return fs.mkdirPerms[i], true
+		}
+	}
+
+	return 0, false
+}
+
+// assertMkdirPerm fails t unless path was created with want.
+func assertMkdirPerm(t *testing.T, fs *fakeFileSystem, path string, want os.FileMode) {
+	t.Helper()
+
+	got, ok := fs.mkdirPerm(path)
+	if !ok {
+		t.Fatalf("expected MkdirAll(%s), got calls for %v", path, fs.mkdirs)
+	}
+
+	if got != want {
+		t.Fatalf("expected %s to be created with mode %#o, got %#o", path, want, got)
+	}
+}
+
+// --- Staging directory permissions ---
+
+func TestBackend_Restore_CreatesStagingDirWithStagingDirMode(t *testing.T) {
+	runner := &fakeEnvRunner{
+		outputs: map[string][]byte{
+			"list /repos/global --last 1 --short": []byte("20260810-020000\n"),
+		},
+	}
+	fs := newFakeFileSystem("/repos/global/config")
+	backend := testBackend(runner, fs, &fakeLogger{})
+	backend.Config.EncryptedPassphrase = "enc:hunter2"
+
+	if err := backend.Restore("/staging"); err != nil {
+		t.Fatalf("Restore returned error: %v", err)
+	}
+
+	assertMkdirPerm(t, fs, "/staging", shared.StagingDirMode)
+}
+
+func TestBackend_Backup_KeepsRepositoryDirOwnerOnly(t *testing.T) {
+	fs := newFakeFileSystem()
+	backend := testBackend(&fakeEnvRunner{}, fs, &fakeLogger{})
+	backend.Config.EncryptedPassphrase = "enc:hunter2"
+
+	if err := backend.Backup("/staging"); err != nil {
+		t.Fatalf("Backup returned error: %v", err)
+	}
+
+	assertMkdirPerm(t, fs, "/repos/global", 0o700)
 }
