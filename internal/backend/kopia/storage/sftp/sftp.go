@@ -39,8 +39,8 @@ type Storage struct {
 	// Mutually exclusive with KeyfilePath.
 	EncryptedPassword string `json:"encrypted_password,omitempty"`
 
-	// KnownHostsPath is an optional path to a known_hosts file for host key
-	// verification. Empty leaves kopia's own default behavior in place.
+	// KnownHostsPath is a path to a known_hosts file holding the server's
+	// host key. Required: kopia refuses to connect over SFTP without one.
 	KnownHostsPath string `json:"known_hosts_path,omitempty"`
 }
 
@@ -63,6 +63,10 @@ func (s Storage) Validate() error {
 
 	if hasKeyfile == hasPassword {
 		return fmt.Errorf("kopia sftp storage requires exactly one of keyfile_path or encrypted_password")
+	}
+
+	if strings.TrimSpace(s.KnownHostsPath) == "" {
+		return fmt.Errorf("kopia sftp storage requires known_hosts_path (kopia refuses to connect without host key verification)")
 	}
 
 	return nil

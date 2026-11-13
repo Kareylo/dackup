@@ -33,7 +33,7 @@ func equalArgs(got []string, want []string) bool {
 }
 
 func TestStorage_ValidateRequiresExactlyOneAuthMethod(t *testing.T) {
-	base := Storage{Host: "h", Username: "u", Path: "/p"}
+	base := Storage{Host: "h", Username: "u", Path: "/p", KnownHostsPath: "/known_hosts"}
 
 	if err := base.Validate(); err == nil {
 		t.Fatal("expected error when neither keyfile_path nor encrypted_password is set")
@@ -68,6 +68,34 @@ func TestStorage_ValidateRequiresHostUsernamePath(t *testing.T) {
 	}
 	if err := (Storage{Host: "h", Username: "u"}).Validate(); err == nil {
 		t.Fatal("expected error when path is missing")
+	}
+}
+
+// Kopia refuses to connect over SFTP without --known-hosts or
+// --known-hosts-data, so a config without known_hosts_path must fail
+// Validate (at "dackup backend create" and before any container stops)
+// rather than at the first backup.
+func TestStorage_ValidateRequiresKnownHostsPath(t *testing.T) {
+	base := Storage{Host: "h", Username: "u", Path: "/p", KeyfilePath: "/key"}
+
+	for _, knownHostsPath := range []string{"", "   "} {
+		storage := base
+		storage.KnownHostsPath = knownHostsPath
+
+		err := storage.Validate()
+		if err == nil {
+			t.Fatalf("expected an error for known_hosts_path %q", knownHostsPath)
+		}
+
+		if !strings.Contains(err.Error(), "known_hosts_path") {
+			t.Fatalf("expected the error to name known_hosts_path, got %v", err)
+		}
+	}
+
+	withKnownHosts := base
+	withKnownHosts.KnownHostsPath = "/home/dackup/.ssh/known_hosts"
+	if err := withKnownHosts.Validate(); err != nil {
+		t.Fatalf("expected no error with known_hosts_path set, got %v", err)
 	}
 }
 

@@ -734,8 +734,9 @@ func TestPromptKopiaSFTPSettings_KeyfileAuthSkipsPasswordPrompt(t *testing.T) {
 	}
 
 	// host, port -> (default 22), username, path, keyfile_path,
-	// known_hosts_path -> (empty)
-	service := newTestServiceWithSecretKey(t, "backup.example.com\n\ndackup\n/srv/backups\n"+keyPath+"\n\n")
+	// known_hosts_path
+	knownHostsPath := writeKnownHostsFile(t)
+	service := newTestServiceWithSecretKey(t, "backup.example.com\n\ndackup\n/srv/backups\n"+keyPath+"\n"+knownHostsPath+"\n")
 
 	got, err := service.promptKopiaSFTPSettings(nil)
 	if err != nil {
@@ -757,8 +758,9 @@ func TestPromptKopiaSFTPSettings_KeyfileAuthSkipsPasswordPrompt(t *testing.T) {
 
 func TestPromptKopiaSFTPSettings_PasswordAuthWhenNoKeyfileGiven(t *testing.T) {
 	// host, port -> 2222, username, path, keyfile_path -> (empty),
-	// password, known_hosts_path -> (empty)
-	service := newTestServiceWithSecretKey(t, "backup.example.com\n2222\ndackup\n/srv/backups\n\nhunter2\n\n")
+	// password, known_hosts_path
+	knownHostsPath := writeKnownHostsFile(t)
+	service := newTestServiceWithSecretKey(t, "backup.example.com\n2222\ndackup\n/srv/backups\n\nhunter2\n"+knownHostsPath+"\n")
 
 	got, err := service.promptKopiaSFTPSettings(nil)
 	if err != nil {
@@ -1133,8 +1135,9 @@ func TestPromptKopiaSettings_SelectsSFTPStorageAndGathersItsSettings(t *testing.
 
 	// bin -> (empty), global_repo_name -> (default), storage_type -> sftp,
 	// host, port -> (default), username, path, keyfile_path,
-	// known_hosts_path -> (empty), password -> hunter2, compression -> (empty).
-	input := "\n\nsftp\nbackup.example.com\n\ndackup\n/srv/backups\n" + keyPath + "\n\nhunter2\n\n"
+	// known_hosts_path, password -> hunter2, compression -> (empty).
+	knownHostsPath := writeKnownHostsFile(t)
+	input := "\n\nsftp\nbackup.example.com\n\ndackup\n/srv/backups\n" + keyPath + "\n" + knownHostsPath + "\nhunter2\n\n"
 	service := newTestServiceWithSecretKey(t, input)
 
 	got, err := service.promptKopiaSettings(kopia.DefaultConfig())
@@ -1447,10 +1450,60 @@ func captureStdout(t *testing.T, fn func()) string {
 	return string(output)
 }
 
+// writeKnownHostsFile creates a known_hosts file for the kopia SFTP prompt,
+// which only accepts a path to an existing file.
+func writeKnownHostsFile(t *testing.T) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "known_hosts")
+	if err := os.WriteFile(path, []byte("backup.example.com ssh-ed25519 AAAA\n"), 0o600); err != nil {
+		t.Fatalf("failed to create known_hosts file: %v", err)
+	}
+
+	return path
+}
+
+// Kopia refuses to connect over SFTP without a known_hosts file, so the
+// prompt must re-ask on an empty answer instead of offering to skip host
+// key verification.
+func TestPromptKopiaSFTPSettings_RequiresKnownHostsPath(t *testing.T) {
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	if err := os.WriteFile(keyPath, []byte("fake key"), 0o600); err != nil {
+		t.Fatalf("failed to create fake keyfile: %v", err)
+	}
+	knownHostsPath := writeKnownHostsFile(t)
+
+	// host, port -> (default 22), username, path, keyfile_path,
+	// known_hosts_path -> (empty, rejected), known_hosts_path
+	service := newTestServiceWithSecretKey(t, "backup.example.com\n\ndackup\n/srv/backups\n"+keyPath+"\n\n"+knownHostsPath+"\n")
+
+	var got sftp.Storage
+	output := captureStdout(t, func() {
+		var err error
+		got, err = service.promptKopiaSFTPSettings(nil)
+		if err != nil {
+			t.Fatalf("promptKopiaSFTPSettings returned error: %v", err)
+		}
+	})
+
+	if got.KnownHostsPath != knownHostsPath {
+		t.Fatalf("expected known_hosts_path %q, got %q", knownHostsPath, got.KnownHostsPath)
+	}
+
+	if !strings.Contains(output, "This value is required.") {
+		t.Fatalf("expected an empty known_hosts_path to be rejected, got %q", output)
+	}
+
+	if strings.Contains(output, "skip host key verification") {
+		t.Fatalf("expected the prompt not to offer skipping host key verification, got %q", output)
+	}
+}
+
 func TestPromptKopiaSFTPSettings_PasswordAuthWarnsAboutProcessListExposure(t *testing.T) {
 	// host, port -> (default 22), username, path, keyfile_path -> (empty),
-	// password, known_hosts_path -> (empty)
-	service := newTestServiceWithSecretKey(t, "backup.example.com\n\ndackup\n/srv/backups\n\nhunter2\n\n")
+	// password, known_hosts_path
+	knownHostsPath := writeKnownHostsFile(t)
+	service := newTestServiceWithSecretKey(t, "backup.example.com\n\ndackup\n/srv/backups\n\nhunter2\n"+knownHostsPath+"\n")
 
 	output := captureStdout(t, func() {
 		if _, err := service.promptKopiaSFTPSettings(nil); err != nil {
@@ -1469,7 +1522,8 @@ func TestPromptKopiaSFTPSettings_KeyfileAuthDoesNotWarn(t *testing.T) {
 		t.Fatalf("failed to create fake keyfile: %v", err)
 	}
 
-	service := newTestServiceWithSecretKey(t, "backup.example.com\n\ndackup\n/srv/backups\n"+keyPath+"\n\n")
+	knownHostsPath := writeKnownHostsFile(t)
+	service := newTestServiceWithSecretKey(t, "backup.example.com\n\ndackup\n/srv/backups\n"+keyPath+"\n"+knownHostsPath+"\n")
 
 	output := captureStdout(t, func() {
 		if _, err := service.promptKopiaSFTPSettings(nil); err != nil {

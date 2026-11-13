@@ -351,7 +351,7 @@ func (service commandService) promptKopiaSFTPSettings(current *sftp.Storage) (sf
 		config.EncryptedPassword = ""
 	}
 
-	knownHostsPath, err := service.promptBinPath("Path to a known_hosts file (leave empty to skip host key verification)", config.KnownHostsPath)
+	knownHostsPath, err := service.promptRequiredFilePath("Path to a known_hosts file containing the server's host key (e.g. ~/.ssh/known_hosts)", config.KnownHostsPath)
 	if err != nil {
 		return sftp.Storage{}, err
 	}
