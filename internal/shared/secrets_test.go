@@ -43,6 +43,10 @@ func (fs fakeSecretFileSystem) MkdirAll(path string, perm os.FileMode) error {
 	return os.MkdirAll(path, perm)
 }
 
+func (fs fakeSecretFileSystem) RemoveAll(path string) error {
+	return fmt.Errorf("fakeSecretFileSystem does not support RemoveAll")
+}
+
 func (fs fakeSecretFileSystem) OpenFile(name string, flag int, perm os.FileMode) (*os.File, error) {
 	if fs.openErr != nil {
 		return nil, fs.openErr

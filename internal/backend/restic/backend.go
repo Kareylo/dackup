@@ -41,7 +41,7 @@ func (backend Backend) Backup(stagingDir string) error {
 // Restore implements the plain backend.Backend fallback, restoring the
 // latest snapshot from the global repository into stagingDir.
 func (backend Backend) Restore(stagingDir string) error {
-	return backend.restoreRepo(stagingDir, backend.Config.GlobalRepoName)
+	return backend.restoreRepo(stagingDir, backend.Config.GlobalRepoName, nil)
 }
 
 // BackupGroups snapshots each group into its own repository, in one restic
@@ -84,7 +84,7 @@ func (backend Backend) RestoreGroups(stagingDir string, groups []shared.BackendG
 	}
 
 	for _, group := range groups {
-		if err := backend.restoreRepo(stagingDir, group.Name); err != nil {
+		if err := backend.restoreRepo(stagingDir, group.Name, group.Paths); err != nil {
 			return err
 		}
 	}

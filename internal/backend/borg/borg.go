@@ -156,7 +156,7 @@ func (backend Backend) Backup(stagingDir string) error {
 // Restore implements the plain backend.Backend fallback, extracting the
 // latest archive from the global repository into stagingDir.
 func (backend Backend) Restore(stagingDir string) error {
-	return backend.extractRepo(stagingDir, backend.Config.GlobalRepoName)
+	return backend.extractRepo(stagingDir, backend.Config.GlobalRepoName, nil)
 }
 
 // BackupGroups archives each group into its own repository, scoped to that
@@ -194,7 +194,7 @@ func (backend Backend) RestoreGroups(stagingDir string, groups []shared.BackendG
 	}
 
 	for _, group := range groups {
-		if err := backend.extractRepo(stagingDir, group.Name); err != nil {
+		if err := backend.extractRepo(stagingDir, group.Name, group.Paths); err != nil {
 			return err
 		}
 	}
@@ -255,7 +255,10 @@ func (backend Backend) archiveRepo(stagingDir string, repoName string, relativeP
 	return nil
 }
 
-func (backend Backend) extractRepo(stagingDir string, repoName string) error {
+// extractRepo extracts the latest archive of repoName into stagingDir,
+// first clearing clearPaths (the group's configured paths) under it so the
+// result holds only what the archive has. The global restore passes nil.
+func (backend Backend) extractRepo(stagingDir string, repoName string, clearPaths []string) error {
 	repoPath := backend.repoPath(repoName)
 
 	if backend.dryRun() {
@@ -286,6 +289,10 @@ func (backend Backend) extractRepo(stagingDir string, repoName string) error {
 	if archiveName == "" {
 		backend.log("WARN", fmt.Sprintf("Borg repository %s has no archives yet; nothing to restore", repoPath))
 		return nil
+	}
+
+	if err := shared.ClearStagingPaths(backend.fileSystem(), stagingDir, clearPaths); err != nil {
+		return err
 	}
 
 	if err := backend.fileSystem().MkdirAll(stagingDir, shared.StagingDirMode); err != nil {

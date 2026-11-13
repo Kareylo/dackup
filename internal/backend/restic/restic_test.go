@@ -86,6 +86,7 @@ type fakeFileSystem struct {
 	mkdirs []string
 	// mkdirPerms[i] is the perm passed with mkdirs[i].
 	mkdirPerms []os.FileMode
+	removed    []string
 }
 
 func (fs *fakeFileSystem) Stat(name string) (os.FileInfo, error) { return nil, os.ErrNotExist }
@@ -93,6 +94,11 @@ func (fs *fakeFileSystem) Stat(name string) (os.FileInfo, error) { return nil, o
 func (fs *fakeFileSystem) MkdirAll(path string, perm os.FileMode) error {
 	fs.mkdirs = append(fs.mkdirs, path)
 	fs.mkdirPerms = append(fs.mkdirPerms, perm)
+	return nil
+}
+
+func (fs *fakeFileSystem) RemoveAll(path string) error {
+	fs.removed = append(fs.removed, path)
 	return nil
 }
 
@@ -599,6 +605,66 @@ func TestBackend_BinaryName_UsesConfiguredBin(t *testing.T) {
 	backend := Backend{Config: Config{Bin: "/usr/local/bin/restic"}}
 	if backend.BinaryName() != "/usr/local/bin/restic" {
 		t.Fatalf("expected configured bin, got %q", backend.BinaryName())
+	}
+}
+
+// restic restore never deletes extra files (and its --delete would wipe
+// the other groups' data in the shared staging directory), so each
+// group's own configured paths are cleared first. A path that cleans to
+// the staging root itself ("/") is never removed.
+func TestBackend_RestoreGroups_ClearsEachGroupPathBeforeRestoring(t *testing.T) {
+	runner := &fakeEnvRunner{}
+	fs := &fakeFileSystem{}
+	backend := testBackend(runner, fs, &fakeLogger{})
+
+	groups := []shared.BackendGroup{
+		{Name: "paperless", Paths: []string{"data/paperless", "/"}},
+		{Name: "adguard", Paths: []string{"/config/adguard"}},
+	}
+
+	if err := backend.RestoreGroups("/staging", groups); err != nil {
+		t.Fatalf("RestoreGroups returned error: %v", err)
+	}
+
+	want := []string{"/staging/data/paperless", "/staging/config/adguard"}
+	if !equalArgs(fs.removed, want) {
+		t.Fatalf("expected removed paths %v, got %v", want, fs.removed)
+	}
+}
+
+// A repository restic reports as missing (exit 10) has nothing to restore,
+// so staging must be left exactly as it was.
+func TestBackend_RestoreGroups_MissingRepoLeavesStagingAlone(t *testing.T) {
+	runner := &fakeEnvRunner{
+		outErrs: map[string]error{"cat config -r /repos/paperless": exitCodeError{code: 10}},
+	}
+	fs := &fakeFileSystem{}
+	backend := testBackend(runner, fs, &fakeLogger{})
+
+	groups := []shared.BackendGroup{{Name: "paperless", Paths: []string{"data/paperless"}}}
+
+	if err := backend.RestoreGroups("/staging", groups); err != nil {
+		t.Fatalf("RestoreGroups returned error: %v", err)
+	}
+
+	if len(fs.removed) != 0 {
+		t.Fatalf("expected nothing removed from staging, got %v", fs.removed)
+	}
+}
+
+// The ungrouped Restore restores the global repository and has no list of
+// configured paths, so it must never clear anything in staging.
+func TestBackend_Restore_GlobalRestoreDoesNotClearStaging(t *testing.T) {
+	runner := &fakeEnvRunner{}
+	fs := &fakeFileSystem{}
+	backend := testBackend(runner, fs, &fakeLogger{})
+
+	if err := backend.Restore("/staging"); err != nil {
+		t.Fatalf("Restore returned error: %v", err)
+	}
+
+	if len(fs.removed) != 0 {
+		t.Fatalf("expected nothing removed from staging, got %v", fs.removed)
 	}
 }
 

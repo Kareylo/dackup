@@ -127,7 +127,9 @@ func (backend Backend) restoreRepo(stagingDir string, repoName string, relativeP
 
 		backend.log("INFO", fmt.Sprintf("Restoring kopia snapshot %s into %s", snapshotID, target))
 
-		if err := envRunner.RunInDirWithEnv("", env, backend.Config.bin(), "snapshot", "restore", snapshotID, target, "--config-file="+configPath); err != nil {
+		// --delete-extra removes files the snapshot doesn't have from this
+		// one target, so leftovers in staging never reach the live data.
+		if err := envRunner.RunInDirWithEnv("", env, backend.Config.bin(), "snapshot", "restore", snapshotID, target, "--delete-extra", "--config-file="+configPath); err != nil {
 			return fmt.Errorf("kopia snapshot restore failed for %s: %w", snapshotID, err)
 		}
 	}

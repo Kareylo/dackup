@@ -49,6 +49,10 @@ func (fs fakeTransferFS) MkdirAll(path string, perm os.FileMode) error {
 	return OSFileSystem{}.MkdirAll(path, perm)
 }
 
+func (fs fakeTransferFS) RemoveAll(path string) error {
+	return fmt.Errorf("fakeTransferFS does not support RemoveAll")
+}
+
 func (fs fakeTransferFS) OpenFile(name string, flag int, perm os.FileMode) (*os.File, error) {
 	return OSFileSystem{}.OpenFile(name, flag, perm)
 }

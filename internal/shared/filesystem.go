@@ -8,6 +8,7 @@ type FileSystem interface {
 	Stat(name string) (os.FileInfo, error)
 	MkdirAll(path string, perm os.FileMode) error
 	OpenFile(name string, flag int, perm os.FileMode) (*os.File, error)
+	RemoveAll(path string) error
 }
 
 // OSFileSystem is the real FileSystem implementation, backed by the os
@@ -24,4 +25,8 @@ func (OSFileSystem) MkdirAll(path string, perm os.FileMode) error {
 
 func (OSFileSystem) OpenFile(name string, flag int, perm os.FileMode) (*os.File, error) {
 	return os.OpenFile(name, flag, perm) // #nosec G304 -- thin os wrapper; callers pass operator-chosen paths
+}
+
+func (OSFileSystem) RemoveAll(path string) error {
+	return os.RemoveAll(path)
 }

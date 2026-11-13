@@ -65,6 +65,7 @@ type fakeFileSystem struct {
 	mkdirs   []string
 	// mkdirPerms[i] is the perm passed with mkdirs[i].
 	mkdirPerms []os.FileMode
+	removed    []string
 }
 
 func newFakeFileSystem(existing ...string) *fakeFileSystem {
@@ -86,6 +87,12 @@ func (fs *fakeFileSystem) MkdirAll(path string, perm os.FileMode) error {
 	fs.mkdirs = append(fs.mkdirs, path)
 	fs.mkdirPerms = append(fs.mkdirPerms, perm)
 	fs.existing[path] = true
+	return nil
+}
+
+func (fs *fakeFileSystem) RemoveAll(path string) error {
+	fs.removed = append(fs.removed, path)
+	delete(fs.existing, path)
 	return nil
 }
 
@@ -502,6 +509,83 @@ func TestBackend_RestoreGroups_ExtractsFromEachGroupRepoOnly(t *testing.T) {
 	want := []string{"/repos/paperless::20260810-020000", "/repos/adguard::20260810-030000"}
 	if !equalArgs(extractArchives, want) {
 		t.Fatalf("expected extract archives %v, got %v", want, extractArchives)
+	}
+}
+
+// A restore must not leave files in staging that the archive doesn't have:
+// borg extract never deletes, so each group's own configured paths are
+// cleared first. A path that cleans to the staging root itself ("/") is
+// never removed.
+func TestBackend_RestoreGroups_ClearsEachGroupPathBeforeExtracting(t *testing.T) {
+	runner := &fakeEnvRunner{
+		outputs: map[string][]byte{
+			"list /repos/paperless --last 1 --short": []byte("20260810-020000\n"),
+			"list /repos/adguard --last 1 --short":   []byte("20260810-030000\n"),
+		},
+	}
+	fs := newFakeFileSystem("/repos/paperless/config", "/repos/adguard/config")
+	backend := testBackend(runner, fs, &fakeLogger{})
+	backend.Config.EncryptedPassphrase = "enc:hunter2"
+
+	groups := []shared.BackendGroup{
+		{Name: "paperless", Paths: []string{"data/paperless", "/"}},
+		{Name: "adguard", Paths: []string{"/config/adguard"}},
+	}
+
+	if err := backend.RestoreGroups("/staging", groups); err != nil {
+		t.Fatalf("RestoreGroups returned error: %v", err)
+	}
+
+	want := []string{"/staging/data/paperless", "/staging/config/adguard"}
+	if !equalArgs(fs.removed, want) {
+		t.Fatalf("expected removed paths %v, got %v", want, fs.removed)
+	}
+}
+
+// When there is nothing to restore (no repository, or no archive yet),
+// staging must be left exactly as it was.
+func TestBackend_RestoreGroups_NoOpRestoreLeavesStagingAlone(t *testing.T) {
+	runner := &fakeEnvRunner{
+		outputs: map[string][]byte{
+			"list /repos/adguard --last 1 --short": []byte(""),
+		},
+	}
+	fs := newFakeFileSystem("/repos/adguard/config")
+	backend := testBackend(runner, fs, &fakeLogger{})
+	backend.Config.EncryptedPassphrase = "enc:hunter2"
+
+	groups := []shared.BackendGroup{
+		{Name: "paperless", Paths: []string{"data/paperless"}},
+		{Name: "adguard", Paths: []string{"config/adguard"}},
+	}
+
+	if err := backend.RestoreGroups("/staging", groups); err != nil {
+		t.Fatalf("RestoreGroups returned error: %v", err)
+	}
+
+	if len(fs.removed) != 0 {
+		t.Fatalf("expected nothing removed from staging, got %v", fs.removed)
+	}
+}
+
+// The ungrouped Restore extracts the global repository (".") and has no
+// list of configured paths, so it must never clear anything in staging.
+func TestBackend_Restore_GlobalRestoreDoesNotClearStaging(t *testing.T) {
+	runner := &fakeEnvRunner{
+		outputs: map[string][]byte{
+			"list /repos/global --last 1 --short": []byte("20260810-020000\n"),
+		},
+	}
+	fs := newFakeFileSystem("/repos/global/config")
+	backend := testBackend(runner, fs, &fakeLogger{})
+	backend.Config.EncryptedPassphrase = "enc:hunter2"
+
+	if err := backend.Restore("/staging"); err != nil {
+		t.Fatalf("Restore returned error: %v", err)
+	}
+
+	if len(fs.removed) != 0 {
+		t.Fatalf("expected nothing removed from staging, got %v", fs.removed)
 	}
 }
 

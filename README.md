@@ -387,6 +387,7 @@ go build -o build/dackup .
 - Use `--dry-run` before running a backup or restore for the first time.
 - Restore uses `rsync -a --delete`, so destination files not present in the backup source can be removed.
 - `staging_dir` holds a plaintext copy of your application data and is not cleaned up after a run. Directories dackup creates under it get mode `0750`, but the staging root itself should be owned by the configured `user`/`group` with mode `0750` or stricter (e.g. `chmod 750 /backups/in`). Staging directories created by older dackup versions keep their `0755` mode until you change it.
+- With a backend configured, `restore` replaces each restored path in `staging_dir` with the archive's content before copying it to `data_dir`: files in staging that the archive does not have are removed, so they cannot come back into the live data.
 
 # TODO
 Here is a list of todo things that should be implemented :

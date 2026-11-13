@@ -79,6 +79,7 @@ type fakeFileSystem struct {
 	mkdirs   []string
 	// mkdirPerms[i] is the perm passed with mkdirs[i].
 	mkdirPerms []os.FileMode
+	removed    []string
 }
 
 func newFakeFileSystem(existing ...string) *fakeFileSystem {
@@ -100,6 +101,12 @@ func (fs *fakeFileSystem) MkdirAll(path string, perm os.FileMode) error {
 	fs.mkdirs = append(fs.mkdirs, path)
 	fs.mkdirPerms = append(fs.mkdirPerms, perm)
 	fs.existing[path] = true
+	return nil
+}
+
+func (fs *fakeFileSystem) RemoveAll(path string) error {
+	fs.removed = append(fs.removed, path)
+	delete(fs.existing, path)
 	return nil
 }
 
@@ -548,7 +555,9 @@ func TestBackend_Restore_RestoresLatestSnapshot(t *testing.T) {
 	}
 
 	restoreCall := runner.calls[2]
-	wantArgs := []string{"snapshot", "restore", "k2b", "/staging", "--config-file=" + globalConfigPath}
+	// --delete-extra: kopia restores one target per configured path, so it
+	// removes files the snapshot doesn't have from that target only.
+	wantArgs := []string{"snapshot", "restore", "k2b", "/staging", "--delete-extra", "--config-file=" + globalConfigPath}
 	if !equalArgs(restoreCall.args, wantArgs) {
 		t.Fatalf("expected restore args %v, got %v", wantArgs, restoreCall.args)
 	}

@@ -61,8 +61,10 @@ func (backend Backend) snapshotRepo(stagingDir string, repoName string, relative
 // as missing (exit 10) is a graceful no-op, since nothing was ever backed
 // up to it; any other failure to open it (wrong password, unreachable
 // storage) is an error, so an outage is never mistaken for "nothing to
-// restore".
-func (backend Backend) restoreRepo(stagingDir string, repoName string) error {
+// restore". Before restoring, clearPaths (the group's configured paths)
+// are removed under stagingDir, so the result holds only what the snapshot
+// has; the global restore passes nil.
+func (backend Backend) restoreRepo(stagingDir string, repoName string, clearPaths []string) error {
 	if backend.dryRun() {
 		backend.log("INFO", fmt.Sprintf("[dry-run] Would restore the latest restic snapshot from repository %q into %s", repoName, stagingDir))
 		return nil
@@ -93,6 +95,10 @@ func (backend Backend) restoreRepo(stagingDir string, repoName string) error {
 	if !exists {
 		backend.log("WARN", fmt.Sprintf("Restic repository %q does not exist yet; nothing to restore", repoName))
 		return nil
+	}
+
+	if err := shared.ClearStagingPaths(backend.fileSystem(), stagingDir, clearPaths); err != nil {
+		return err
 	}
 
 	if err := backend.fileSystem().MkdirAll(stagingDir, shared.StagingDirMode); err != nil {
