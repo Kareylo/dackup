@@ -144,7 +144,8 @@ test-integration-docker:
 		fi; \
 	done
 	@echo "Building dackup and running kopia/restic storage + borg integration tests inside test/Dockerfile..."
-	docker compose -f test/compose.yml --profile docker-tests run --rm test_dackup
+	docker compose -f test/compose.yml --profile docker-tests build test_dackup
+	docker compose -f test/compose.yml --profile docker-tests run --rm --no-deps test_dackup
 
 .PHONY: test-integration-down
 test-integration-down:

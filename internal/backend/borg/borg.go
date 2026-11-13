@@ -9,6 +9,7 @@ package borg
 import (
 	"dackup/internal/shared"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -245,7 +246,10 @@ func (backend Backend) archiveRepo(stagingDir string, repoName string, relativeP
 	backend.log("INFO", fmt.Sprintf("Creating borg archive %s", archive))
 
 	if err := envRunner.RunInDirWithEnv(stagingDir, env, backend.Config.bin(), args...); err != nil {
-		return fmt.Errorf("borg create failed for %s: %w", archive, err)
+		if !isBorgWarning(err) {
+			return fmt.Errorf("borg create failed for %s: %w", archive, err)
+		}
+		backend.log("WARN", fmt.Sprintf("borg create for %s finished with warnings; see the command log for details", archive))
 	}
 
 	return nil
@@ -293,7 +297,10 @@ func (backend Backend) extractRepo(stagingDir string, repoName string) error {
 	backend.log("INFO", fmt.Sprintf("Extracting borg archive %s into %s", archive, stagingDir))
 
 	if err := envRunner.RunInDirWithEnv(stagingDir, env, backend.Config.bin(), "extract", archive); err != nil {
-		return fmt.Errorf("borg extract failed for %s: %w", archive, err)
+		if !isBorgWarning(err) {
+			return fmt.Errorf("borg extract failed for %s: %w", archive, err)
+		}
+		backend.log("WARN", fmt.Sprintf("borg extract for %s finished with warnings; see the command log for details", archive))
 	}
 
 	return nil
@@ -408,4 +415,14 @@ func (backend Backend) log(level string, message string) {
 	}
 
 	backend.Logger.Log(level, message)
+}
+
+// isBorgWarning reports whether err is borg exiting with code 1, which
+// borg documents as "warning (operation reached its normal end, but there
+// were warnings)", e.g. a file changed while it was read, or an extended
+// attribute the destination filesystem can't store. Code 2 and above, a
+// signal, or an error with no exit code at all stay errors.
+func isBorgWarning(err error) bool {
+	var exitErr interface{ ExitCode() int }
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == 1
 }
