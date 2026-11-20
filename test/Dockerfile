@@ -9,7 +9,7 @@
 # `make test-integration` does — through their published localhost ports —
 # without touching any of the integration tests' hardcoded
 # "localhost:<port>" config.
-FROM golang:1.27.0-bookworm
+FROM golang:1.27.4-bookworm
 
 # kopia isn't packaged in Debian's apt repos, and unlike borg its exact
 # version matters more here (behavior can vary enough across releases to
