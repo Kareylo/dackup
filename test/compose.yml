@@ -114,7 +114,7 @@ services:
     volumes:
       - test_webdav_data:/var/lib/dav
   test_azurite:
-    image: mcr.microsoft.com/azure-storage/azurite:3.37.0@sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5
+    image: mcr.microsoft.com/azure-storage/azurite:3.38.0@sha256:c26024d62bf4a5b88a40968afd217234c00e1fc9a4790dc6105d1ca7979f6eec
     container_name: test_azurite
     # networks.default.aliases: same underscore-in-hostname issue as
     # test_s3 above — test_azurite_init addresses this container as
