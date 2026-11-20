@@ -141,7 +141,7 @@ services:
   # storage type expects (test/config.azure.json) — see
   # scripts/init-azurite.sh.
   test_azurite_init:
-    image: mcr.microsoft.com/azure-cli:2.92.0@sha256:a4e2660b4099b76f02001a9316a0eb0dc56e330b5f7d1d1312c932200645bf26
+    image: mcr.microsoft.com/azure-cli:2.93.0@sha256:cf40cc2f8895161698cfb16aec989c60250e66c105b57752b30a20d87d515963
     container_name: test_azurite_init
     depends_on:
       - test_azurite
